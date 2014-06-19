@@ -89,7 +89,7 @@ class SearchVolumes(OauthHandler):
             logging.exception(e)
         self.response.write(json.dumps({
             'status': 200,
-            'count': volumes.number_found,
+            'count': matches.number_found,
             'results': results,
         }))
 

@@ -58,16 +58,24 @@ class AddSubscriptions(OauthHandler):
         self.response.write(json.dumps(response))
 
 class ListSubs(OauthHandler):
+    @ndb.tasklet
+    def subscription_context(self, subscription):
+        volume = yield subscription.volume.get_async()
+        publisher = yield volume.publisher.get_async()
+        raise ndb.Return({
+            'subscription': model_to_dict(subscription),
+            'volume': model_to_dict(volume),
+            'publisher': model_to_dict(publisher),
+        })
+
     def get(self):
         user_key = users.user_key(self.user)
         query = Subscription.query(ancestor=user_key)
-        results = query.map(subscription_context)
+        results = query.map(self.subscription_context)
         response = {
             'status': 200,
             'count': len(results),
-            'results': [
-                model_to_dict(sub) for sub in results
-            ],
+            'results': results,
         }
         self.response.write(json.dumps(response))
 

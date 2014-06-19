@@ -8,12 +8,12 @@ from google.appengine.ext import ndb
 
 # pylint: disable=F0401
 
-from pulldb import users
 from pulldb.base import create_app, OauthHandler, Route
 from pulldb.models.base import model_to_dict
 from pulldb.models import issues
 from pulldb.models import pulls
 from pulldb.models import subscriptions
+from pulldb.models import users
 from pulldb.models import volumes
 
 # pylint: disable=W0232,E1101,R0903,R0201,C0103
