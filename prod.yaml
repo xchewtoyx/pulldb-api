@@ -10,6 +10,15 @@ automatic_scaling:
   max_idle_instances: automatic  # default value
   min_pending_latency: automatic  # default value
 
+builtins:
+- appstats: on
+
+libraries:
+- name: webapp2
+  version: latest
+- name: jinja2
+  version: latest
+
 handlers:
 - url: /api/issues/.*
   script: api.issues.app
