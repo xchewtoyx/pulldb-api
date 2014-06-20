@@ -75,7 +75,7 @@ class SearchIssues(OauthHandler):
                 'rank': issue.rank,
             }
             for field in issue.fields:
-                result[field.name] = str(field.value)
+                result[field.name] = unicode(field.value)
             results.append(result)
         self.response.write(json.dumps({
             'status': 200,
