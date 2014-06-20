@@ -11,6 +11,7 @@ from pulldb.base import create_app, Route, OauthHandler
 from pulldb.models.base import model_to_dict
 from pulldb.models import comicvine
 from pulldb.models import issues
+from pulldb.models import users
 from pulldb.models import volumes
 
 # pylint: disable=W0232,E1101,R0903,C0103
@@ -45,6 +46,29 @@ class AddVolumes(OauthHandler):
             'status': 200,
             'results': results
         }
+        self.response.write(json.dumps(response))
+
+class DropIndex(OauthHandler):
+    def get(self, doc_id):
+        user = users.user_key(app_user=self.user).get()
+        if not user.trusted:
+            logging.warn('Untrusted access attempt: %r', self.user)
+            self.abort(401)
+        index = search.Index(name='volumes')
+        try:
+            index.delete(doc_id)
+        except search.Error as error:
+            response = {
+                'status': 500,
+                'message': 'Error dropping document %s' % doc_id,
+            }
+            logging.error(response['message'])
+            logging.exception(error)
+        else:
+            response = {
+                'status': 200,
+                'message': 'Document %s dropped' % doc_id,
+            }
         self.response.write(json.dumps(response))
 
 class GetVolume(OauthHandler):
@@ -97,6 +121,27 @@ class Issues(OauthHandler):
             }
         self.response.write(json.dumps(response))
 
+class Reindex(OauthHandler):
+    def get(self, identifier):
+        user = users.user_key(app_user=self.user).get()
+        if not user.trusted:
+            logging.warn('Untrusted access attempt: %r', self.user)
+            self.abort(401)
+        volume_key = ndb.Key(volumes.Volume, identifier)
+        volume = volume_key.get()
+        if volume:
+            volumes.index_volume(volume_key, volume)
+            response = {
+                'status': 200,
+                'message': 'Volume %s reindexed' % identifier,
+            }
+        else:
+            response = {
+                'status': 404,
+                'message': 'Volume %s not found' % identifier,
+            }
+        self.response.write(json.dumps(response))
+
 class SearchVolumes(OauthHandler):
     def get(self):
         index = search.Index(name='volumes')
@@ -124,5 +169,7 @@ app = create_app([
     Route('/api/volumes/add', AddVolumes),
     Route('/api/volumes/<identifier>/get', GetVolume),
     Route('/api/volumes/<identifier>/list', Issues),
+    Route('/api/volumes/<identifier>/reindex', Reindex),
+    Route('/api/volumes/index/<doc_id>/drop', DropIndex),
     Route('/api/volumes/search', SearchVolumes),
 ])
