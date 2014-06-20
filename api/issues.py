@@ -10,12 +10,36 @@ from google.appengine.ext import ndb
 # pylint: disable=F0401
 from pulldb.base import create_app, Route, OauthHandler
 from pulldb.models.base import model_to_dict
+from pulldb.models import comicvine
 from pulldb.models import issues
 from pulldb.models.issues import Issue
-from pulldb.models import comicvine
+from pulldb.models import users
 from pulldb.models.volumes import Volume
 
 # pylint: disable=W0232,E1101,R0903,C0103
+
+class DropIndex(OauthHandler):
+    def get(self, doc_id):
+        user = users.user_key(app_user=self.user).get()
+        if not user.trusted:
+            logging.warn('Untrusted access attempt: %r', self.user)
+            self.abort(401)
+        index = search.Index(name='issues')
+        try:
+            index.delete(doc_id)
+        except search.Error as error:
+            response = {
+                'status': 500,
+                'message': 'Error dropping document %s' % doc_id,
+            }
+            logging.error(response['message'])
+            logging.exception(error)
+        else:
+            response = {
+                'status': 200,
+                'message': 'Document %s dropped' % doc_id,
+            }
+        self.response.write(json.dumps(response))
 
 class GetIssue(OauthHandler):
     @ndb.tasklet
@@ -63,6 +87,27 @@ class RefreshIssue(OauthHandler):
         logging.debug(status['message'])
         self.response.write(json.dumps(status))
 
+class Reindex(OauthHandler):
+    def get(self, identifier):
+        user = users.user_key(app_user=self.user).get()
+        if not user.trusted:
+            logging.warn('Untrusted access attempt: %r', self.user)
+            self.abort(401)
+        query = issues.Issue.query(issues.Issue.identifier == int(identifier))
+        issue = query.fetch()
+        if issue:
+            issues.index_issue(issue.key, issue)
+            response = {
+                'status': 200,
+                'message': 'Issue %s reindexed' % identifier,
+            }
+        else:
+            response = {
+                'status': 404,
+                'message': 'Issue %s not found' % identifier,
+            }
+        self.response.write(json.dumps(response))
+
 class SearchIssues(OauthHandler):
     def get(self):
         index = search.Index(name='issues')
@@ -84,7 +129,9 @@ class SearchIssues(OauthHandler):
         }))
 
 app = create_app([
+    Route('/api/issues/<identifier>/reindex', Reindex),
     Route('/api/issues/get/<identifier>', GetIssue),
     Route('/api/issues/refresh/<issue>', RefreshIssue),
+    Route('/api/issues/index/<doc_id>/drop', DropIndex),
     Route('/api/issues/search', SearchIssues),
 ])
