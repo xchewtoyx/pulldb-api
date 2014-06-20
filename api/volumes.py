@@ -8,7 +8,9 @@ from google.appengine.ext import ndb
 
 # pylint: disable=F0401
 from pulldb.base import create_app, Route, OauthHandler
+from pulldb.models.base import model_to_dict
 from pulldb.models import comicvine
+from pulldb.models import issues
 from pulldb.models import volumes
 
 # pylint: disable=W0232,E1101,R0903,C0103
@@ -70,6 +72,31 @@ class GetVolume(OauthHandler):
             }
         self.response.write(json.dumps(response))
 
+class Issues(OauthHandler):
+    def get(self, identifier):
+        volume = ndb.Key(volumes.Volume, identifier).get()
+        if volume:
+            query = issues.Issue.query(
+                ancestor=volume.key
+            ).order(issues.Issue.pubdate)
+            logging.debug('Looking for issues: %r', query)
+            results = query.fetch()
+            logging.debug('Query returned %d results', len(results))
+            response = {
+                'status': 200,
+                'message': 'Found %d issues' % len(results),
+                'volume': model_to_dict(volume),
+                'results': [model_to_dict(issue) for issue in results],
+            }
+        else:
+            logging.info('Volume %s not foune', identifier)
+            response = {
+                'status': 404,
+                'message': 'Volume %s not found' % identifier,
+                'results': [],
+            }
+        self.response.write(json.dumps(response))
+
 class SearchVolumes(OauthHandler):
     def get(self):
         index = search.Index(name='volumes')
@@ -95,6 +122,7 @@ class SearchVolumes(OauthHandler):
 
 app = create_app([
     Route('/api/volumes/add', AddVolumes),
-    Route('/api/volumes/get/<identifier>', GetVolume),
+    Route('/api/volumes/<identifier>/get', GetVolume),
+    Route('/api/volumes/<identifier>/list', Issues),
     Route('/api/volumes/search', SearchVolumes),
 ])
