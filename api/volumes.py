@@ -23,8 +23,8 @@ class AddVolumes(OauthHandler):
         volume_ids = request['volumes']
         results = defaultdict(list)
         keys = [
-            ndb.Key(
-                volumes.Volume, volume_id
+            volumes.volume_key(
+                volume_id, create=False
             ) for volume_id in volume_ids
         ]
         ndb.get_multi(keys)
@@ -73,7 +73,7 @@ class DropIndex(OauthHandler):
 
 class GetVolume(OauthHandler):
     def get(self, identifier):
-        volume_key = ndb.Key(volumes.Volume, identifier)
+        volume_key = volumes.volume_key(identifier)
         volume = volume_key.get()
         if volume:
             publisher = volume.publisher.get()
@@ -98,7 +98,7 @@ class GetVolume(OauthHandler):
 
 class Issues(OauthHandler):
     def get(self, identifier):
-        volume = ndb.Key(volumes.Volume, identifier).get()
+        volume = volumes.volume_key(identifier, create=False).get()
         if volume:
             query = issues.Issue.query(
                 ancestor=volume.key
@@ -127,7 +127,7 @@ class Reindex(OauthHandler):
         if not user.trusted:
             logging.warn('Untrusted access attempt: %r', self.user)
             self.abort(401)
-        volume_key = ndb.Key(volumes.Volume, identifier)
+        volume_key = volumes.volume_key(identifier, create=False)
         volume = volume_key.get()
         if volume:
             volumes.index_volume(volume_key, volume)

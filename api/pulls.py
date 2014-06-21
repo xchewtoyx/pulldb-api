@@ -18,35 +18,24 @@ from pulldb.models import volumes
 
 # pylint: disable=W0232,E1101,R0903,R0201,C0103
 
-@ndb.tasklet
-def pull_context(pull):
-    issue = yield pull.issue.get_async()
-    volume = yield issue.key.parent().get_async()
-    raise ndb.Return({
-        'pull': model_to_dict(pull),
-        'issue': model_to_dict(issue),
-        'volume': model_to_dict(volume),
-    })
-
 class AddPulls(OauthHandler):
     def post(self):
         user_key = users.user_key(self.user)
         request = json.loads(self.request.body)
         issue_ids = request['issues']
         results = defaultdict(list)
-        query = issues.Issue.query(issues.Issue.identifier.IN(
-            [int(identifier) for identifier in issue_ids]))
+        query = issues.Issue.query(
+            issues.Issue.identifier.IN(
+                [int(identifier) for identifier in issue_ids]
+            )
+        )
         records = query.fetch()
         issue_dict = {record.key.id(): record for record in records}
         candidates = []
         for issue_id in issue_ids:
             issue = issue_dict.get(issue_id)
             if issue:
-                pull_key = ndb.Key(
-                    users.User, user_key.id(),
-                    subscriptions.Subscription, issue.key.parent().id(),
-                    pulls.Pull, issue_id,
-                )
+                pull_key = pulls.pull_key(issue)
                 candidates.append((issue.key, pull_key))
             else:
                 logging.info(
@@ -79,30 +68,25 @@ class AddPulls(OauthHandler):
 
 class GetPull(OauthHandler):
     @ndb.tasklet
-    def issue_pull_context(self, issue):
-        volume_id = issue.key.parent().id()
-        issue_id = issue.key.id()
-        sub_key = ndb.Key(
-            subscriptions.Subscription, volume_id,
-            parent=self.user_key
-        )
-        pull_key = ndb.Key(
-            pulls.Pull, issue_id,
-            parent=sub_key,
-        )
-        pull = yield pull_key.get_async()
-        if pull:
-            raise ndb.Return({
-                'pull': model_to_dict(pull),
-                'issue': model_to_dict(issue),
-            })
+    def pull_context(self, pull):
+        if pull.subscription:
+            volume_key = volumes.volume_key(pull.subscription.id())
+            issue, volume = yield pull.issue.get_async(), volume_key.get_async()
+        else: # TODO(rgh): remove when legacy pulls removed
+            issue = yield pull.issue.get_async()
+            volume = yield issue.key.parent().get_async()
+        raise ndb.Return({
+            'pull': model_to_dict(pull),
+            'issue': model_to_dict(issue),
+            'volume': model_to_dict(volume),
+        })
 
     def get(self, identifier):
         self.user_key = users.user_key(self.user)
         query = issues.Issue.query(
             issues.Issue.identifier == int(identifier)
         )
-        result = query.map(self.issue_pull_context)
+        result = query.map(self.pull_context)
         if result:
             self.response.write({
                 'status': 200,
@@ -111,10 +95,24 @@ class GetPull(OauthHandler):
             })
 
 class ListPulls(OauthHandler):
+    @ndb.tasklet
+    def pull_context(self, pull):
+        if pull.subscription:
+            volume_key = volumes.volume_key(pull.subscription.id())
+            issue, volume = yield pull.issue.get_async(), volume_key.get_async()
+        else: # TODO(rgh): remove when legacy pulls removed
+            issue = yield pull.issue.get_async()
+            volume = yield issue.key.parent().get_async()
+        raise ndb.Return({
+            'pull': model_to_dict(pull),
+            'issue': model_to_dict(issue),
+            'volume': model_to_dict(volume),
+        })
+
     def get(self):
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(ancestor=user_key)
-        results = query.map(pull_context)
+        results = query.map(self.pull_context)
         self.response.write(json.dumps({
             'status': 200,
             'results': results,
@@ -122,23 +120,23 @@ class ListPulls(OauthHandler):
 
 class NewIssues(OauthHandler):
     @ndb.tasklet
-    def check_pulled(self, subscription, issue):
-        pull_key = ndb.Key(pulls.Pull, issue.key.id(), parent=subscription.key)
+    def check_pulled(self, issue):
+        pull_key = pulls.pull_key(issue.key.id())
         pull = yield pull_key.get_async()
         if not pull:
             raise ndb.Return(issue)
 
     @ndb.tasklet
     def find_new_issues(self, subscription):
-        pull_check_callback = partial(self.check_pulled, subscription)
         query = issues.Issue.query(
-            ancestor=subscription.volume).filter(
-                issues.Issue.pubdate > subscription.start_date).order(
-                    issues.Issue.pubdate)
+            issues.Issue.volume == subscription.volume
+        ).filter(
+            issues.Issue.pubdate > subscription.start_date
+        ).order(issues.Issue.pubdate)
         # volume is pre-fetched here for cacheing but not used
         dummy_volume, results = yield (
             subscription.volume.get_async(),
-            query.map_async(pull_check_callback))
+            query.map_async(self.check_pulled))
         if results:
             raise ndb.Return(
                 subscription,
@@ -167,7 +165,11 @@ class NewIssues(OauthHandler):
 class UnreadIssues(OauthHandler):
     @ndb.tasklet
     def fetch_issue_data(self, pull):
-        volume_key = ndb.Key(volumes.Volume, pull.key.parent().id())
+        if pull.volume:
+            volume_key = pull.volume
+        else:
+            # TODO(rgh): Remove when data migrated
+            volume_key = ndb.Key(volumes.Volume, pull.key.parent().id())
         issue_key = pull.issue
         volume, issue = yield volume_key.get_async(), issue_key.get_async()
         raise ndb.Return({
@@ -201,11 +203,7 @@ class UpdatePulls(OauthHandler):
         for issue_id in issue_ids:
             issue = issue_dict.get(issue_id)
             if issue:
-                pull_key = ndb.Key(
-                    users.User, user_key.id(),
-                    subscriptions.Subscription, issue.key.parent().id(),
-                    pulls.Pull, issue_id,
-                )
+                pull_key = pulls.pull_key(issue_id)
                 candidates.append(pull_key)
             else:
                 # no such issue
@@ -241,22 +239,10 @@ class UpdatePulls(OauthHandler):
         self.response.write(json.dumps(response))
 
 app = create_app([
-    Route(
-        '/api/pulls/add', AddPulls,
-    ),
-    Route(
-        '/api/pulls/get/<identifier>', GetPull,
-    ),
-    Route(
-        '/api/pulls/list', ListPulls,
-    ),
-    Route(
-        '/api/pulls/new', NewIssues,
-    ),
-    Route(
-        '/api/pulls/unread', UnreadIssues,
-    ),
-    Route(
-        '/api/pulls/update', UpdatePulls,
-    ),
+    Route('/api/pulls/add', AddPulls),
+    Route('/api/pulls/get/<identifier>', GetPull),
+    Route('/api/pulls/list', ListPulls),
+    Route('/api/pulls/new', NewIssues),
+    Route('/api/pulls/unread', UnreadIssues),
+    Route('/api/pulls/update', UpdatePulls),
 ])

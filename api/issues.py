@@ -44,7 +44,10 @@ class DropIndex(OauthHandler):
 class GetIssue(OauthHandler):
     @ndb.tasklet
     def issue_dict(self, issue):
-        volume = yield issue.key.parent().get_async()
+        if issue.volume:
+            volume = yield issue.volume.get_async()
+        else: # TODO(rgh): Remove when legacy issues all gone
+            volume = yield issue.key.parent().get_async()
         raise ndb.Return({
             'volume': model_to_dict(volume),
             'issue': model_to_dict(issue),
@@ -94,9 +97,9 @@ class Reindex(OauthHandler):
             logging.warn('Untrusted access attempt: %r', self.user)
             self.abort(401)
         query = issues.Issue.query(issues.Issue.identifier == int(identifier))
-        issue = query.fetch()
+        issue = query.get()
         if issue:
-            issues.index_issue(issue.key, issue)
+            issue.index_document()
             response = {
                 'status': 200,
                 'message': 'Issue %s reindexed' % identifier,

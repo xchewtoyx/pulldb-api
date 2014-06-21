@@ -9,7 +9,7 @@ from google.appengine.ext import ndb
 # pylint: disable=F0401
 from pulldb.base import create_app, Route, OauthHandler
 from pulldb.models.base import model_to_dict
-from pulldb.models.subscriptions import Subscription, subscription_context
+from pulldb.models import subscriptions
 from pulldb.models import users
 from pulldb.models import volumes
 
@@ -22,8 +22,8 @@ class AddSubscriptions(OauthHandler):
         volume_ids = request['volumes']
         results = defaultdict(list)
         keys = [
-            ndb.Key(
-                Subscription, volume_id, parent=user_key
+            subscriptions.subscription_key(
+                volume_id
             ) for volume_id in volume_ids
         ]
         # prefetch for efficiency
@@ -35,7 +35,6 @@ class AddSubscriptions(OauthHandler):
                 results['skipped'].append(key.id())
             else:
                 candidates.append(key)
-        volume_keys = [ndb.Key(volumes.Volume, key.id()) for key in candidates]
         logging.info('%d candidates, %d volumes', len(candidates),
                      len(volume_keys))
         # prefetch for efficiency
@@ -43,10 +42,8 @@ class AddSubscriptions(OauthHandler):
         subs = []
         for volume_key, candidate in zip(volume_keys, candidates):
             if volume_key.get():
-                subs.append(Subscription(
-                    key=candidate,
-                    volume=volume_key,
-                ))
+                subs.append(subscriptions.subscription_key(
+                    volume_key, create=True, batch=True))
                 results['added'].append(candidate.id())
             else:
                 results['failed'].append(candidate.id())
@@ -85,9 +82,7 @@ class UpdateSubs(OauthHandler):
         request = json.loads(self.request.body)
         updates = request.get('updates', [])
         results = defaultdict(list)
-        sub_keys = [
-            ndb.Key(Subscription, key, parent=user_key) for key in updates
-        ]
+        sub_keys = [subscriptions.subscription_key(key) for key in updates]
         # bulk fetch to populate the cache
         ndb.get_multi(sub_keys)
         updated_subs = []
