@@ -24,6 +24,8 @@ handlers:
   script: api.issues.app
 - url: /api/pulls/.*
   script: api.pulls.app
+- url: /api/streams/.*
+  script: api.streams.app
 - url: /api/subscriptions/.*
   script: api.subscriptions.app
 - url: /api/volumes/.*
