@@ -37,7 +37,7 @@ class AddPulls(OauthHandler):
             if issue:
                 try:
                     pull_key = pulls.pull_key(
-                        issue, user_key=user_key, create=False)
+                        issue, user=user_key, create=False)
                     candidates.append((issue.key, pull_key))
                 except pulls.NoSuchIssue as error:
                     logging.info(
@@ -133,7 +133,7 @@ class NewIssues(OauthHandler):
     @ndb.tasklet
     def check_pulled(self, subscription, issue):
         pull_key = pulls.pull_key(
-            issue.key.id(), user_key=subscription.key.parent())
+            issue.key.id(), user=subscription.key.parent())
         pull = yield pull_key.get_async()
         if not pull:
             raise ndb.Return(issue)
@@ -217,7 +217,7 @@ class UpdatePulls(OauthHandler):
         for issue_id in issue_ids:
             issue = issue_dict.get(issue_id)
             if issue:
-                pull_key = pulls.pull_key(issue_id, user_key=user_key)
+                pull_key = pulls.pull_key(issue_id, user=user_key)
                 candidates.append(pull_key)
             else:
                 # no such issue
