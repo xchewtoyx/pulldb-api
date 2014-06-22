@@ -35,11 +35,20 @@ class AddPulls(OauthHandler):
         for issue_id in issue_ids:
             issue = issue_dict.get(issue_id)
             if issue:
-                pull_key = pulls.pull_key(issue)
-                candidates.append((issue.key, pull_key))
+                try:
+                    pull_key = pulls.pull_key(
+                        issue, user_key=user_key, create=False)
+                    candidates.append((issue.key, pull_key))
+                except pulls.NoSuchIssue as error:
+                    logging.info(
+                        'Unable to add pull, issue %s/%r not found',
+                        issue_id, issue
+                    )
+                    results['failed'].append(issue_id)
             else:
                 logging.info(
-                    'Unable to add pull, issue %s not found', issue_id)
+                    'Unable to add pull, issue %s/%r not found',
+                    issue_id, issue)
                 results['failed'].append(issue_id)
         # prefetch for efficiency
         ndb.get_multi(pull for issue, pull in candidates)
@@ -51,7 +60,7 @@ class AddPulls(OauthHandler):
                     issue_key.id()
                 )
                 # Already exists
-                results['failed'].append(pull_key.id())
+                results['skipped'].append(pull_key.id())
             else:
                 new_pulls.append(pulls.Pull(
                     key=pull_key,
@@ -73,6 +82,7 @@ class GetPull(OauthHandler):
             volume_key = volumes.volume_key(pull.subscription.id())
             issue, volume = yield pull.issue.get_async(), volume_key.get_async()
         else: # TODO(rgh): remove when legacy pulls removed
+            logging.warn('Pull %s is legacy' % pull.key.id())
             issue = yield pull.issue.get_async()
             volume = yield issue.key.parent().get_async()
         raise ndb.Return({
@@ -101,6 +111,7 @@ class ListPulls(OauthHandler):
             volume_key = volumes.volume_key(pull.subscription.id())
             issue, volume = yield pull.issue.get_async(), volume_key.get_async()
         else: # TODO(rgh): remove when legacy pulls removed
+            logging.warn('Pull %s has legacy key' % pull.key.id())
             issue = yield pull.issue.get_async()
             volume = yield issue.key.parent().get_async()
         raise ndb.Return({
@@ -120,8 +131,9 @@ class ListPulls(OauthHandler):
 
 class NewIssues(OauthHandler):
     @ndb.tasklet
-    def check_pulled(self, issue):
-        pull_key = pulls.pull_key(issue.key.id())
+    def check_pulled(self, subscription, issue):
+        pull_key = pulls.pull_key(
+            issue.key.id(), user_key=subscription.key.parent())
         pull = yield pull_key.get_async()
         if not pull:
             raise ndb.Return(issue)
@@ -134,9 +146,10 @@ class NewIssues(OauthHandler):
             issues.Issue.pubdate > subscription.start_date
         ).order(issues.Issue.pubdate)
         # volume is pre-fetched here for cacheing but not used
+        pull_check_callback = partial(self.check_pulled, subscription)
         dummy_volume, results = yield (
             subscription.volume.get_async(),
-            query.map_async(self.check_pulled))
+            query.map_async(pull_check_callback))
         if results:
             raise ndb.Return(
                 subscription,
@@ -169,6 +182,7 @@ class UnreadIssues(OauthHandler):
             volume_key = pull.volume
         else:
             # TODO(rgh): Remove when data migrated
+            logging.warn('pull %s has no volume' % pull.key)
             volume_key = ndb.Key(volumes.Volume, pull.key.parent().id())
         issue_key = pull.issue
         volume, issue = yield volume_key.get_async(), issue_key.get_async()
@@ -203,7 +217,7 @@ class UpdatePulls(OauthHandler):
         for issue_id in issue_ids:
             issue = issue_dict.get(issue_id)
             if issue:
-                pull_key = pulls.pull_key(issue_id)
+                pull_key = pulls.pull_key(issue_id, user_key=user_key)
                 candidates.append(pull_key)
             else:
                 # no such issue
