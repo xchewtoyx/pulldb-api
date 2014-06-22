@@ -62,7 +62,7 @@ class AddStreams(OauthHandler):
 class GetStream(OauthHandler):
     def get(self, identifier):
         user_key = users.user_key(self.user)
-        query = streams.Stream(
+        query = streams.Stream.query(
             streams.Stream.name == identifier,
             ancestor=user_key,
         )
