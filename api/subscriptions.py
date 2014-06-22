@@ -67,7 +67,7 @@ class ListSubs(OauthHandler):
 
     def get(self):
         user_key = users.user_key(self.user)
-        query = Subscription.query(ancestor=user_key)
+        query = subscriptions.Subscription.query(ancestor=user_key)
         results = query.map(self.subscription_context)
         response = {
             'status': 200,

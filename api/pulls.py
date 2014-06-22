@@ -241,8 +241,8 @@ class UpdatePulls(OauthHandler):
 app = create_app([
     Route('/api/pulls/add', AddPulls),
     Route('/api/pulls/get/<identifier>', GetPull),
-    Route('/api/pulls/list', ListPulls),
-    Route('/api/pulls/new', NewIssues),
-    Route('/api/pulls/unread', UnreadIssues),
+    Route('/api/pulls/list/all', ListPulls),
+    Route('/api/pulls/list/new', NewIssues),
+    Route('/api/pulls/list/unread', UnreadIssues),
     Route('/api/pulls/update', UpdatePulls),
 ])
