@@ -212,7 +212,11 @@ class UpdatePulls(OauthHandler):
     def post(self):
         user_key = users.user_key(self.user)
         request = json.loads(self.request.body)
-        issue_ids = request.get('read', []) + request.get('unread', [])
+        issue_ids = (
+            request.get('pull', []) +
+            request.get('read', []) +
+            request.get('unread', [])
+        )
         results = defaultdict(list)
         query = issues.Issue.query(issues.Issue.identifier.IN(
             [int(identifier) for identifier in issue_ids]))
