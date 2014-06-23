@@ -43,13 +43,13 @@ class DropIndex(OauthHandler):
 
 class GetIssue(OauthHandler):
     @ndb.tasklet
-    def issue_dict(self, issue):
-        if issue.volume:
+    def issue_context(self, issue):
+        volume_dict = {}
+        if self.request.get('context'):
             volume = yield issue.volume.get_async()
-        else: # TODO(rgh): Remove when legacy issues all gone
-            volume = yield issue.key.parent().get_async()
+            volume_dict = model_to_dict(volume)
         raise ndb.Return({
-            'volume': model_to_dict(volume),
+            'volume': volume_dict,
             'issue': model_to_dict(issue),
         })
 

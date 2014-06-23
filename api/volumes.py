@@ -72,29 +72,33 @@ class DropIndex(OauthHandler):
         self.response.write(json.dumps(response))
 
 class GetVolume(OauthHandler):
+    @ndb.task
+    def volume_context(self, volume):
+        publisher_dict = {}
+        if self.request.get('context'):
+            publisher = yield volume.publisher.get_async()
+            publisher_dict = model_to_dict(publisher)
+        raise ndb.Return({
+            'volume': model_to_dict(volume),
+            'publisher': publisher_dict,
+        })
+
     def get(self, identifier):
-        volume_key = volumes.volume_key(identifier)
-        volume = volume_key.get()
-        if volume:
-            publisher = volume.publisher.get()
-            volume_dict = volume.to_dict()
-            publisher_dict = publisher.to_dict()
-            response = {
-                'status': 200,
-                'message': 'matching volume found',
-                'volume': {
-                    key: unicode(value) for key, value in volume_dict.items()
-                },
-                'publisher': {
-                    key: unicode(value) for key, value in publisher_dict.items()
-                }
-            }
+        query = volumes.Volume.query(
+            volumes.Volume.identifier == int(identifier)
+        )
+        volumes = query.map(self.volume_context)
+        if volumes:
+            status = 200
+            message = '%d matching volumes found' % len(volumes)
         else:
-            response = {
-                'status': 404,
-                'message': 'no matching volume found',
-            }
-        self.response.write(json.dumps(response))
+            status = 404
+            message = 'no matching volume found'
+        self.response.write(json.dumps({
+            'status': status,
+            'message': message,
+            'results': volumes
+        }))
 
 class Issues(OauthHandler):
     def get(self, identifier):

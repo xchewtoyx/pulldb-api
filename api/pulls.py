@@ -18,6 +18,22 @@ from pulldb.models import volumes
 
 # pylint: disable=W0232,E1101,R0903,R0201,C0103
 
+@ndb.tasklet
+def pull_context(pull, context=False):
+    issue_dict = {}
+    volume_dict = {}
+    if context:
+        issue, volume = yield (
+            pull.issue.get_async(), pull.volume.get_async()
+        )
+        issue_dict = model_to_dict(issue)
+        volume_dict = model_to_dict(volume)
+    raise ndb.Return({
+        'pull': model_to_dict(pull),
+        'issue': issue_dict,
+        'volume': volume_dict,
+    })
+
 class AddPulls(OauthHandler):
     def post(self):
         user_key = users.user_key(self.user)
@@ -76,81 +92,46 @@ class AddPulls(OauthHandler):
         self.response.write(json.dumps(response))
 
 class GetPull(OauthHandler):
-    @ndb.tasklet
-    def pull_context(self, pull):
-        if pull.subscription:
-            volume_key = volumes.volume_key(pull.subscription.id())
-            issue, volume = yield pull.issue.get_async(), volume_key.get_async()
-        else: # TODO(rgh): remove when legacy pulls removed
-            logging.warn('Pull %s is legacy' % pull.key.id())
-            issue = yield pull.issue.get_async()
-            volume = yield issue.key.parent().get_async()
-        raise ndb.Return({
-            'pull': model_to_dict(pull),
-            'issue': model_to_dict(issue),
-            'volume': model_to_dict(volume),
-        })
-
     def get(self, identifier):
         self.user_key = users.user_key(self.user)
         query = issues.Issue.query(
             issues.Issue.identifier == int(identifier)
         )
-        result = query.map(self.pull_context)
+        results = query.map(pull_context)
         if result:
-            self.response.write({
-                'status': 200,
-                'pull': result['pull'],
-                'issue': result['issue'],
-            })
+            status = 200
+            message = 'Found pull for %r' % identifier
+        else:
+            status = 404
+            message = 'Pull not found (%r)' % identifier
+        self.response.write(json.dumps({
+            'status': status,
+            'message': message,
+        }))
 
 class ListPulls(OauthHandler):
-    @ndb.tasklet
-    def pull_context(self, pull):
-        if pull.subscription:
-            volume_key = volumes.volume_key(pull.subscription.id())
-            issue, volume = yield pull.issue.get_async(), volume_key.get_async()
-        else: # TODO(rgh): remove when legacy pulls removed
-            logging.warn('Pull %s has legacy key' % pull.key.id())
-            issue = yield pull.issue.get_async()
-            volume = yield issue.key.parent().get_async()
-        raise ndb.Return({
-            'pull': model_to_dict(pull),
-            'issue': model_to_dict(issue),
-            'volume': model_to_dict(volume),
-        })
-
     def get(self):
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(ancestor=user_key)
-        results = query.map(self.pull_context)
+        context_callback = partial(pull_context,
+                                   context=self.request.get('context'))
+        results = query.map(context_callback)
         self.response.write(json.dumps({
             'status': 200,
-            'results': results,
+            'message': '%d pulls found' % len(results),
+            'results': list(results),
         }))
 
 class NewIssues(OauthHandler):
-    @ndb.tasklet
-    def pull_context(self, pull):
-        if pull.issue and not pull.volume:
-            logging.warn('Cannot fetch context for %r: %r, %r',
-                         pull.key, pull.issue, pull.volume)
-            issue = yield pull.issue.get_async()
-            pull.volume = issue.volume
-        issue, volume = yield pull.issue.get_async(), pull.volume.get_async()
-        raise ndb.Return({
-            'pull': model_to_dict(pull),
-            'issue': model_to_dict(issue),
-            'volume': model_to_dict(volume),
-        })
-
     def get(self):
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(
             pulls.Pull.pulled == False,
             ancestor=user_key
         ).order(pulls.Pull.pubdate)
-        new_pulls = query.map(self.pull_context)
+        context_callback = partial(pull_context,
+                                   context=self.request.get('context'))
+        new_pulls = query.map(context_callback)
         result = {
             'status': 200,
             'results': new_pulls,
@@ -182,18 +163,6 @@ class RefreshPull(OauthHandler):
         })
 
 class UnreadIssues(OauthHandler):
-    @ndb.tasklet
-    def fetch_issue_data(self, pull):
-        if pull.volume:
-            volume_key = pull.volume
-        issue_key = pull.issue
-        volume, issue = yield volume_key.get_async(), issue_key.get_async()
-        raise ndb.Return({
-            'pull': model_to_dict(pull),
-            'issue': model_to_dict(issue),
-            'volume': model_to_dict(volume),
-        })
-
     def get(self):
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(
@@ -201,9 +170,12 @@ class UnreadIssues(OauthHandler):
             pulls.Pull.read == False,
             ancestor=user_key
         ).order(pulls.Pull.pubdate)
-        unread_pulls = query.map(self.fetch_issue_data)
+        context_callback = partial(
+            pull_context, context=self.request.get('context'))
+        unread_pulls = query.map(context_callback)
         result = {
             'status': 200,
+            'message': 'Found %d unread pulls' % len(unread_pulls),
             'results': unread_pulls,
         }
         self.response.write(json.dumps(result))

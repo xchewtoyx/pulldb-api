@@ -20,17 +20,29 @@ from pulldb.models import volumes
 # pylint: disable=W0232,E1101,R0903,R0201,C0103
 
 @ndb.tasklet
-def stream_context(stream):
-    issues, volumes, publishers = yield (
-        ndb.get_multi_async(stream.issues or []),
-        ndb.get_multi_async(stream.volumes or []),
-        ndb.get_multi_async(stream.publishers or []),
-    )
+def stream_context(stream, context=False):
+    issue_list = []
+    volume_list = []
+    publisher__list = []
+    if context:
+        issues, volumes, publishers = yield (
+            ndb.get_multi_async(stream.issues or []),
+            ndb.get_multi_async(stream.volumes or []),
+            ndb.get_multi_async(stream.publishers or []),
+        )
+        issue_list = [model_to_dict(issue) for issue in issues]
+        volume_list = [model_to_dict(volume) for volume in volumes]
+        publishers_list = [
+            model_to_dict(publisher) for publisher in publishers]
+    else:
+        issue_list = [key.id() for key in stream.issues]
+        volume_list = [key.id() for key in stream.issues]
+        publisher_list = [key.id() for key in stream.issues]
     raise ndb.Return({
         'stream': model_to_dict(stream),
-        'issues': [model_to_dict(issue) for issue in issues],
-        'volumes': [model_to_dict(volume) for volume in volumes],
-        'publishers': [model_to_dict(publisher) for publisher in publishers]
+        'issues': issue_list,
+        'volumes': volume_list,
+        'publishers': publisher_list,
     })
 
 class AddStreams(OauthHandler):
@@ -66,7 +78,8 @@ class GetStream(OauthHandler):
             streams.Stream.name == identifier,
             ancestor=user_key,
         )
-        results = query.map(stream_context)
+        context_callback = partial(stream_context, self.request.get('context'))
+        results = query.map(context_callback)
         if results:
             status = 200
             message = 'Stream %s found' % identifier,
@@ -83,7 +96,8 @@ class ListStreams(OauthHandler):
     def get(self):
         user_key = users.user_key(self.user)
         query = streams.Stream.query(ancestor=user_key)
-        results = query.map(stream_context)
+        context_callback = partial(stream_context, self.request.get('context'))
+        results = query.map(context_callback)
         self.response.write(json.dumps({
             'status': 200,
             'results': results,
