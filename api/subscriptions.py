@@ -23,7 +23,7 @@ class AddSubscriptions(OauthHandler):
         results = defaultdict(list)
         keys = [
             subscriptions.subscription_key(
-                volume_id
+                volume_id, user=user_key, create=False
             ) for volume_id in volume_ids
         ]
         # prefetch for efficiency
@@ -36,21 +36,22 @@ class AddSubscriptions(OauthHandler):
             else:
                 candidates.append(key)
         logging.info('%d candidates, %d volumes', len(candidates),
-                     len(volume_keys))
+                     len(volume_ids))
         # prefetch for efficiency
-        ndb.get_multi(volume_keys)
+        ndb.get_multi(candidates)
         subs = []
-        for volume_key, candidate in zip(volume_keys, candidates):
+        for volume_key in candidates:
             if volume_key.get():
                 subs.append(subscriptions.subscription_key(
-                    volume_key, create=True, batch=True))
+                    volume_key, user=user_key, create=True, batch=True))
                 results['added'].append(candidate.id())
             else:
                 results['failed'].append(candidate.id())
         ndb.put_multi(subs)
         response = {
             'status': 200,
-            'results': results
+            'message': 'added %d subscriptions' % len(candidates),
+            'results': results,
         }
         self.response.write(json.dumps(response))
 
