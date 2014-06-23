@@ -164,12 +164,16 @@ class RefreshPull(OauthHandler):
 
 class UnreadIssues(OauthHandler):
     def get(self):
+        if self.request.get('weighted'):
+            sortkey = pulls.Pull.weight
+        else:
+            sortkey = pulls.Pull.pubdate
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(
             pulls.Pull.pulled == True,
             pulls.Pull.read == False,
             ancestor=user_key
-        ).order(pulls.Pull.pubdate)
+        ).order(sortkey)
         context_callback = partial(
             pull_context, context=self.request.get('context'))
         unread_pulls = query.map(context_callback)
