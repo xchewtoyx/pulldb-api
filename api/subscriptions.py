@@ -40,13 +40,16 @@ class AddSubscriptions(OauthHandler):
         # prefetch for efficiency
         ndb.get_multi(candidates)
         subs = []
-        for volume_key in candidates:
+        for subscription_key in candidates:
+            volume_key = volumes.volume_key(
+                subscription_key.id(), create=False
+            )
             if volume_key.get():
                 subs.append(subscriptions.subscription_key(
                     volume_key, user=user_key, create=True, batch=True))
-                results['added'].append(candidate.id())
+                results['added'].append(volume_key.id())
             else:
-                results['failed'].append(candidate.id())
+                results['failed'].append(volume_key.id())
         ndb.put_multi(subs)
         response = {
             'status': 200,
