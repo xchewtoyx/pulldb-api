@@ -46,7 +46,7 @@ class AddPulls(OauthHandler):
                 [int(identifier) for identifier in issue_ids]
             )
         )
-        records = query.fetch(keys_only=True)
+        records = query.fetch()
         issue_dict = {record.key.id(): record for record in records}
         candidates = []
         for issue_id in issue_ids:
@@ -198,7 +198,7 @@ class UpdatePulls(OauthHandler):
         results = defaultdict(list)
         query = issues.Issue.query(issues.Issue.identifier.IN(
             [int(identifier) for identifier in issue_ids]))
-        records = query.fetch(projection=issues.Issue.projection())
+        records = query.fetch()
         issue_dict = {record.key.id(): record for record in records}
         candidates = []
         for issue_id in issue_ids:
