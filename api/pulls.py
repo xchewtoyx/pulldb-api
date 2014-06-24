@@ -24,7 +24,8 @@ def pull_context(pull, context=False):
     volume_dict = {}
     if context:
         issue, volume = yield (
-            pull.issue.get_async(), pull.volume.get_async()
+            pull.issue.get_async(),
+            pull.volume.get_async(),
         )
         issue_dict = model_to_dict(issue)
         volume_dict = model_to_dict(volume)
@@ -45,7 +46,7 @@ class AddPulls(OauthHandler):
                 [int(identifier) for identifier in issue_ids]
             )
         )
-        records = query.fetch()
+        records = query.fetch(keys_only=True)
         issue_dict = {record.key.id(): record for record in records}
         candidates = []
         for issue_id in issue_ids:
@@ -97,7 +98,8 @@ class GetPull(OauthHandler):
         query = issues.Issue.query(
             issues.Issue.identifier == int(identifier)
         )
-        results = query.map(pull_context)
+        results = query.map(
+            pull_context, context=self.request.get('context'))
         if result:
             status = 200
             message = 'Found pull for %r' % identifier
@@ -113,8 +115,8 @@ class ListPulls(OauthHandler):
     def get(self):
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(ancestor=user_key)
-        context_callback = partial(pull_context,
-                                   context=self.request.get('context'))
+        context_callback = partial(
+            pull_context, context=self.request.get('context'))
         results = query.map(context_callback)
         self.response.write(json.dumps({
             'status': 200,
@@ -129,8 +131,8 @@ class NewIssues(OauthHandler):
             pulls.Pull.pulled == False,
             ancestor=user_key
         ).order(pulls.Pull.pubdate)
-        context_callback = partial(pull_context,
-                                   context=self.request.get('context'))
+        context_callback = partial(
+            pull_context, context=self.request.get('context'))
         new_pulls = query.map(context_callback)
         result = {
             'status': 200,
@@ -196,7 +198,7 @@ class UpdatePulls(OauthHandler):
         results = defaultdict(list)
         query = issues.Issue.query(issues.Issue.identifier.IN(
             [int(identifier) for identifier in issue_ids]))
-        records = query.fetch()
+        records = query.fetch(projection=issues.Issue.projection())
         issue_dict = {record.key.id(): record for record in records}
         candidates = []
         for issue_id in issue_ids:
