@@ -72,7 +72,7 @@ class DropIndex(OauthHandler):
         self.response.write(json.dumps(response))
 
 class GetVolume(OauthHandler):
-    @ndb.task
+    @ndb.tasklet
     def volume_context(self, volume):
         publisher_dict = {}
         if self.request.get('context'):
