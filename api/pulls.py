@@ -92,15 +92,37 @@ class AddPulls(OauthHandler):
         }
         self.response.write(json.dumps(response))
 
+class FetchPulls(OauthHandler):
+    def post(self):
+        user_key = users.user_key(self.user)
+        request = json.loads(self.request.body)
+        pull_keys = []
+        for pull_id in request.get('ids', []):
+            pull_keys.append(
+                pulls.pull_key(pull_id, user=user_key, create=False))
+        pulls = ndb.get_multi(pull_keys)
+        if pulls:
+            status = 200
+            message = 'Found %d pulls' % identifier
+        else:
+            status = 404
+            message = 'No pulls found (%r)' % identifier
+        self.response.write(json.dumps({
+            'status': status,
+            'message': message,
+            'results': pulls,
+        }))
+
 class GetPull(OauthHandler):
     def get(self, identifier):
         self.user_key = users.user_key(self.user)
-        query = issues.Issue.query(
-            issues.Issue.identifier == int(identifier)
+        query = pulls.Pull.query(
+            pulls.Pull.identifier == int(identifier)
         )
-        results = query.map(
+        context_callback = partial(
             pull_context, context=self.request.get('context'))
-        if result:
+        results = query.map(context_callback)
+        if results:
             status = 200
             message = 'Found pull for %r' % identifier
         else:
@@ -109,6 +131,7 @@ class GetPull(OauthHandler):
         self.response.write(json.dumps({
             'status': status,
             'message': message,
+            'results': results,
         }))
 
 class ListPulls(OauthHandler):
@@ -249,6 +272,7 @@ class UpdatePulls(OauthHandler):
 
 app = create_app([
     Route('/api/pulls/add', AddPulls),
+    Route('/api/pulls/fetch', FetchPulls),
     Route('/api/pulls/<identifier>/get', GetPull),
     Route('/api/pulls/<identifier>/refresh', RefreshPull),
     Route('/api/pulls/list/all', ListPulls),
