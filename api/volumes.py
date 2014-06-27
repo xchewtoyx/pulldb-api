@@ -87,17 +87,17 @@ class GetVolume(OauthHandler):
         query = volumes.Volume.query(
             volumes.Volume.identifier == int(identifier)
         )
-        volumes = query.map(self.volume_context)
+        volume_list = query.map(self.volume_context)
         if volumes:
             status = 200
-            message = '%d matching volumes found' % len(volumes)
+            message = '%d matching volumes found' % len(volume_list)
         else:
             status = 404
             message = 'no matching volume found'
         self.response.write(json.dumps({
             'status': status,
             'message': message,
-            'results': volumes
+            'results': volume_list,
         }))
 
 class Issues(OauthHandler):
