@@ -189,6 +189,9 @@ class RefreshPull(OauthHandler):
 
 class UnreadIssues(OauthHandler):
     def get(self):
+        limit = None
+        if self.request.get('limit'):
+            limit = self.request['limit']
         if self.request.get('weighted'):
             sortkey = pulls.Pull.weight
         else:
@@ -201,7 +204,7 @@ class UnreadIssues(OauthHandler):
         ).order(sortkey)
         context_callback = partial(
             pull_context, context=self.request.get('context'))
-        unread_pulls = query.map(context_callback)
+        unread_pulls = query.map(context_callback, limit=limit)
         result = {
             'status': 200,
             'message': 'Found %d unread pulls' % len(unread_pulls),
