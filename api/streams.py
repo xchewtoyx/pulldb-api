@@ -96,7 +96,8 @@ class ListStreams(OauthHandler):
     def get(self):
         user_key = users.user_key(self.user)
         query = streams.Stream.query(ancestor=user_key)
-        context_callback = partial(stream_context, self.request.get('context'))
+        context_callback = partial(
+            stream_context, context=self.request.get('context'))
         results = query.map(context_callback)
         self.response.write(json.dumps({
             'status': 200,
