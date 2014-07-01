@@ -78,7 +78,8 @@ class GetStream(OauthHandler):
             streams.Stream.name == identifier,
             ancestor=user_key,
         )
-        context_callback = partial(stream_context, self.request.get('context'))
+        context_callback = partial(
+            stream_context, context=self.request.get('context'))
         results = query.map(context_callback)
         if results:
             status = 200
@@ -86,11 +87,11 @@ class GetStream(OauthHandler):
         else:
             status = 404
             message = 'Stream %s not found' % identifier
-        self.response.write({
+        self.response.write(json.dumps({
             'status': status,
             'message': message,
             'results': results,
-        })
+        }))
 
 class ListStreams(OauthHandler):
     def get(self):
