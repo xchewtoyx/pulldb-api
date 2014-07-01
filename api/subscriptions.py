@@ -91,7 +91,10 @@ class UpdateSubs(OauthHandler):
         request = json.loads(self.request.body)
         updates = request.get('updates', [])
         results = defaultdict(list)
-        sub_keys = [subscriptions.subscription_key(key) for key in updates]
+        sub_keys = [
+            subscriptions.subscription_key(
+                key, user=user_key) for key in updates
+        ]
         # bulk fetch to populate the cache
         ndb.get_multi(sub_keys)
         updated_subs = []
