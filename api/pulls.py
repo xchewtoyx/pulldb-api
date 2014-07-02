@@ -4,6 +4,7 @@ from functools import partial
 import json
 import logging
 
+from google.appengine.datastore.datastore_query import Cursor
 from google.appengine.ext import ndb
 
 # pylint: disable=F0401
@@ -135,30 +136,65 @@ class GetPull(OauthHandler):
         }))
 
 class ListPulls(OauthHandler):
+    @ndb.tasklet
+    def fetch_page(self, query):
+        limit = self.request.get('limit', 100)
+        cursor = Cursor(urlsafe=self.request.get('position'))
+        pulls, next_cursor, more = yield query.fetch_page_async(
+            limit, start_cursor=cursor)
+        context_callback = partial(
+            pull_context, context=self.request.get('context'))
+        context_futures = map(context_callback, pulls)
+        results = yield context_futures
+        raise ndb.Return(
+            results,
+            next_cursor,
+            more,
+        )
+
     def get(self):
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(ancestor=user_key)
-        context_callback = partial(
-            pull_context, context=self.request.get('context'))
-        results = query.map(context_callback)
+        count_future = query.count_async()
+        results, next_cursor, more = self.fetch_page(query).get_result()
         self.response.write(json.dumps({
             'status': 200,
-            'message': '%d pulls found' % len(results),
+            'message': '%d pulls found' % count_future.get_result(),
+            'more_results': more,
+            'next_page': next_cursor.urlsafe(),
             'results': list(results),
         }))
 
 class NewIssues(OauthHandler):
+    @ndb.tasklet
+    def fetch_page(self, query):
+        limit = self.request.get('limit', 100)
+        cursor = Cursor(urlsafe=self.request.get('position'))
+        pulls, next_cursor, more = yield query.fetch_page_async(
+            limit, start_cursor=cursor)
+        context_callback = partial(
+            pull_context, context=self.request.get('context'))
+        context_futures = map(context_callback, pulls)
+        results = yield context_futures
+        raise ndb.Return(
+            results,
+            next_cursor,
+            more,
+        )
+
     def get(self):
         user_key = users.user_key(self.user)
         query = pulls.Pull.query(
             pulls.Pull.pulled == False,
             ancestor=user_key
         ).order(pulls.Pull.pubdate)
-        context_callback = partial(
-            pull_context, context=self.request.get('context'))
-        new_pulls = query.map(context_callback)
+        count_future = query.count_async()
+        new_pulls, next_cursor, more = self.fetch_page(query).get_result()
         result = {
             'status': 200,
+            'message': 'Found %d results' % count_future.get_result(),
+            'position': next_cursor.urlsafe(),
+            'more': more,
             'results': new_pulls,
         }
         self.response.write(json.dumps(result))
@@ -188,10 +224,23 @@ class RefreshPull(OauthHandler):
         })
 
 class UnreadIssues(OauthHandler):
+    @ndb.tasklet
+    def fetch_page(self, query):
+        limit = self.request.get('limit', 100)
+        cursor = Cursor(urlsafe=self.request.get('position'))
+        pulls, next_cursor, more = yield query.fetch_page_async(
+            limit, start_cursor=cursor)
+        context_callback = partial(
+            pull_context, context=self.request.get('context'))
+        context_futures = map(context_callback, pulls)
+        results = yield context_futures
+        raise ndb.Return(
+            results,
+            next_cursor,
+            more,
+        )
+
     def get(self):
-        limit = None
-        if self.request.get('limit'):
-            limit = self.request['limit']
         if self.request.get('weighted'):
             sortkey = pulls.Pull.weight
         else:
@@ -202,12 +251,13 @@ class UnreadIssues(OauthHandler):
             pulls.Pull.read == False,
             ancestor=user_key
         ).order(sortkey)
-        context_callback = partial(
-            pull_context, context=self.request.get('context'))
-        unread_pulls = query.map(context_callback, limit=limit)
+        count_future = query.count_async()
+        unread_pulls, next_cursor, more = self.fetch_page(query).get_result()
         result = {
             'status': 200,
-            'message': 'Found %d unread pulls' % len(unread_pulls),
+            'message': 'Found %d unread pulls' % count_future.get_result(),
+            'more': more,
+            'position': next_cursor.urlsafe(),
             'results': unread_pulls,
         }
         self.response.write(json.dumps(result))
