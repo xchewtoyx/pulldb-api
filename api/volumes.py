@@ -11,6 +11,7 @@ from pulldb.base import create_app, Route, OauthHandler
 from pulldb.models.base import model_to_dict
 from pulldb.models import comicvine
 from pulldb.models import issues
+from pulldb.models import subscriptions
 from pulldb.models import users
 from pulldb.models import volumes
 
@@ -75,12 +76,20 @@ class GetVolume(OauthHandler):
     @ndb.tasklet
     def volume_context(self, volume):
         publisher_dict = {}
+        subscription_dict = {}
         if self.request.get('context'):
-            publisher = yield volume.publisher.get_async()
+            user_key = users.user_key(app_user=self.user)
+            publisher, subscription = yield (
+                volume.publisher.get_async(),
+                subscriptions.subscription_key(
+                    volume.key, user=user_key, create=False).get_async())
             publisher_dict = model_to_dict(publisher)
+            subscription_dict = model_to_dict(subscription)
+
         raise ndb.Return({
             'volume': model_to_dict(volume),
             'publisher': publisher_dict,
+            'subscription': subscription_dict,
         })
 
     def get(self, identifier):
