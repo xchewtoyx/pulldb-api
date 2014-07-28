@@ -20,6 +20,7 @@ class AddSubscriptions(OauthHandler):
         user_key = users.user_key(self.user)
         request = json.loads(self.request.body)
         volume_ids = request['volumes']
+        logging.info('Adding volumes: %r', volume_ids);
         results = defaultdict(list)
         keys = [
             subscriptions.subscription_key(
