@@ -157,11 +157,15 @@ class ListPulls(OauthHandler):
         query = pulls.Pull.query(ancestor=user_key)
         count_future = query.count_async()
         results, next_cursor, more = self.fetch_page(query).get_result()
+        if next_cursor:
+            position = next_cursor.urlsafe()
+        else:
+            position = ''
         self.response.write(json.dumps({
             'status': 200,
             'message': '%d pulls found' % count_future.get_result(),
             'more_results': more,
-            'next_page': next_cursor.urlsafe(),
+            'next_page': position,
             'results': list(results),
         }))
 
@@ -190,10 +194,14 @@ class NewIssues(OauthHandler):
         ).order(pulls.Pull.pubdate)
         count_future = query.count_async()
         new_pulls, next_cursor, more = self.fetch_page(query).get_result()
+        if next_cursor:
+            position = next_cursor.urlsafe()
+        else:
+            position = ''
         result = {
             'status': 200,
             'message': 'Found %d results' % count_future.get_result(),
-            'position': next_cursor.urlsafe(),
+            'position': position,
             'more': more,
             'results': new_pulls,
         }
@@ -253,11 +261,15 @@ class UnreadIssues(OauthHandler):
         ).order(sortkey)
         count_future = query.count_async()
         unread_pulls, next_cursor, more = self.fetch_page(query).get_result()
+        if next_cursor:
+            position = next_cursor.urlsafe()
+        else:
+            position = ''
         result = {
             'status': 200,
             'message': 'Found %d unread pulls' % count_future.get_result(),
             'more': more,
-            'position': next_cursor.urlsafe(),
+            'position': position,
             'results': unread_pulls,
         }
         self.response.write(json.dumps(result))
