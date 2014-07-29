@@ -17,7 +17,7 @@ from pulldb.models import volumes
 
 class AddSubscriptions(OauthHandler):
     def post(self):
-        user_key = users.user_key(self.user)
+        user_key = users.user_key(self.user, create=False)
         request = json.loads(self.request.body)
         volume_ids = request['volumes']
         logging.info('Adding volumes: %r', volume_ids);
@@ -76,7 +76,7 @@ class ListSubs(OauthHandler):
         })
 
     def get(self):
-        user_key = users.user_key(self.user)
+        user_key = users.user_key(self.user, create=False)
         query = subscriptions.Subscription.query(ancestor=user_key)
         results = query.map(self.subscription_context)
         response = {
@@ -86,9 +86,42 @@ class ListSubs(OauthHandler):
         }
         self.response.write(json.dumps(response))
 
+class RemoveSubscriptions(OauthHandler):
+    @ndb.toplevel
+    def post(self):
+        user_key = users.user_key(self.user, create=False)
+        request = json.loads(self.request.body)
+        volume_ids = request['volumes']
+        logging.info('Removing volumes: %r', volume_ids);
+        results = defaultdict(list)
+        keys = [
+            subscriptions.subscription_key(
+                volume_id, user=user_key, create=False
+            ) for volume_id in volume_ids
+        ]
+        # prefetch for efficiency
+        ndb.get_multi(keys)
+        candidates = []
+        for key in keys:
+            volume = key.get()
+            if volume:
+                results['skipped'].append(key.id())
+            else:
+                candidates.append(key)
+        logging.info('%d candidates, %d volumes', len(candidates),
+                     len(volume_ids))
+        # prefetch for efficiency
+        ndb.delete_multi_async(candidates)
+        response = {
+            'status': 200,
+            'message': 'removed %d subscriptions' % len(candidates),
+            'results': [key.id() for key in candidates],
+        }
+        self.response.write(json.dumps(response))
+
 class UpdateSubs(OauthHandler):
     def post(self):
-        user_key = users.user_key(self.user)
+        user_key = users.user_key(self.user, create=False)
         request = json.loads(self.request.body)
         updates = request.get('updates', [])
         results = defaultdict(list)
@@ -123,5 +156,6 @@ class UpdateSubs(OauthHandler):
 app = create_app([
     Route('/api/subscriptions/add', AddSubscriptions),
     Route('/api/subscriptions/list', ListSubs),
+    Route('/api/subscriptions/remove', RemoveSubscriptions),
     Route('/api/subscriptions/update', UpdateSubs),
 ])
