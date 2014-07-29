@@ -231,6 +231,32 @@ class RefreshPull(OauthHandler):
             'message': 'pull refreshed',
         })
 
+class RemovePulls(OauthHandler):
+    @ndb.toplevel
+    def post(self):
+        user_key = users.user_key(self.user, create=False)
+        request = json.loads(self.request.body)
+        issue_ids = request['issues']
+        results = defaultdict(list)
+        pull_keys = [ ndb.Key(
+            pulls.Pull, issue_id, parent=user_key) for issue_id in issue_ids]
+        records = ndb.get_multi(pull_keys)
+        issue_dict = {record.key.id(): record for record in records}
+        candidates = []
+        for issue_id, pull in zip(issue_ids, records):
+            if pull:
+                results['removed'].append(issue_id)
+                candidates.append(pull.key)
+            else:
+                results['skipped'].append(issue_id)
+        ndb.delete_multi(candidates)
+        response = {
+            'status': 200,
+            'message': 'Removed %d pulls' % len(results['removed']),
+            'results': results
+        }
+        self.response.write(json.dumps(response))
+
 class UnreadIssues(OauthHandler):
     @ndb.tasklet
     def fetch_page(self, query):
@@ -343,5 +369,6 @@ app = create_app([
     Route('/api/pulls/list/all', ListPulls),
     Route('/api/pulls/list/new', NewIssues),
     Route('/api/pulls/list/unread', UnreadIssues),
+    Route('/api/pulls/remove', RemovePulls),
     Route('/api/pulls/update', UpdatePulls),
 ])
