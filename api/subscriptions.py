@@ -92,7 +92,7 @@ class RemoveSubscriptions(OauthHandler):
         user_key = users.user_key(self.user, create=False)
         request = json.loads(self.request.body)
         volume_ids = request['volumes']
-        logging.info('Removing volumes: %r', volume_ids);
+        logging.info('Removing subscriptions: %r', volume_ids);
         results = defaultdict(list)
         keys = [
             subscriptions.subscription_key(
@@ -103,11 +103,11 @@ class RemoveSubscriptions(OauthHandler):
         ndb.get_multi(keys)
         candidates = []
         for key in keys:
-            volume = key.get()
-            if volume:
-                results['skipped'].append(key.id())
-            else:
+            subscription = key.get()
+            if subscription:
                 candidates.append(key)
+            else:
+                results['skipped'].append(key.id())
         logging.info('%d candidates, %d volumes', len(candidates),
                      len(volume_ids))
         # prefetch for efficiency
