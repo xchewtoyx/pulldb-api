@@ -155,6 +155,44 @@ class Reindex(OauthHandler):
             }
         self.response.write(json.dumps(response))
 
+class SearchComicvine(OauthHandler):
+    def get(self):
+        cv = comicvine.load()
+        query = self.request.get('q')
+        volume_ids = self.request.get('volume_ids')
+        page = int(self.request.get('page', 0))
+        limit = int(self.request.get('limit', 20))
+        offset = page * limit
+        if volume_ids:
+            volumes = [
+                int(identifier) for identifier in re.findall(
+                    r'(\d+)', volume_ids)
+            ]
+            logging.debug('Found volume ids: %r', volumes)
+            results = []
+            for index in range(0, len(volumes), 100):
+                volume_page = volumes[index:min([index+100, len(volumes)])]
+                results.extend(cv.fetch_volume_batch(volume_page))
+            results_count = len(results)
+            logging.debug('Found volumes: %r', results)
+        elif query:
+            results_count, results = cv.search_volume(
+                query, page=page, limit=limit)
+            logging.debug('Found volumes: %r', results)
+        if offset + limit > results_count:
+            page_end = results_count
+        else:
+            page_end = offset + limit
+        logging.info('Retrieving results %d-%d / %d', offset, page_end,
+                     results_count)
+        results_page = results[offset:page_end]
+
+        self.response.write(json.dumps({
+            'status': 200,
+            'count': results_count,
+            'results': results_page,
+        }))
+
 class SearchVolumes(OauthHandler):
     def get(self):
         index = search.Index(name='volumes')
@@ -184,5 +222,6 @@ app = create_app([
     Route('/api/volumes/<identifier>/list', Issues),
     Route('/api/volumes/<identifier>/reindex', Reindex),
     Route('/api/volumes/index/<doc_id>/drop', DropIndex),
+    Route('/api/volumes/search/comicvine', SearchComicvine),
     Route('/api/volumes/search', SearchVolumes),
 ])
