@@ -164,14 +164,15 @@ class SearchComicvine(OauthHandler):
         limit = int(self.request.get('limit', 20))
         offset = page * limit
         if volume_ids:
-            volumes = [
+            volume_ids = [
                 int(identifier) for identifier in re.findall(
                     r'(\d+)', volume_ids)
             ]
             logging.debug('Found volume ids: %r', volumes)
             results = []
-            for index in range(0, len(volumes), 100):
-                volume_page = volumes[index:min([index+100, len(volumes)])]
+            for index in range(0, len(volume_ids), 100):
+                volume_page = volume_ids[
+                    index:min([index+100, len(volume_ids)])]
                 results.extend(cv.fetch_volume_batch(volume_page))
             results_count = len(results)
             logging.debug('Found volumes: %r', results)
@@ -186,6 +187,8 @@ class SearchComicvine(OauthHandler):
         logging.info('Retrieving results %d-%d / %d', offset, page_end,
                      results_count)
         results_page = results[offset:page_end]
+        for result in results_page:
+            volume_id = volumes.volume_key(result)
 
         self.response.write(json.dumps({
             'status': 200,
