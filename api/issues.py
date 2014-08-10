@@ -55,7 +55,7 @@ class GetIssue(OauthHandler):
 
     def get(self, identifier):
         query = Issue.query(Issue.identifier == int(identifier))
-        results = query.map(self.issue_dict)
+        results = query.map(self.issue_context)
         self.response.write(json.dumps({
             'status': 200,
             'results': results
