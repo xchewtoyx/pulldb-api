@@ -304,8 +304,10 @@ class UpdatePulls(OauthHandler):
     def post(self):
         user_key = users.user_key(self.user)
         request = json.loads(self.request.body)
+        logging.debug('Decoded post data: %r' % request)
         issue_ids = (
             request.get('pull', []) +
+            request.get('unpull', []) +
             request.get('read', []) +
             request.get('unread', [])
         )
@@ -334,19 +336,30 @@ class UpdatePulls(OauthHandler):
                         results['skipped'].append(pull_key.id())
                     else:
                         results['updated'].append(pull_key.id())
+                        logging.info('pulling %r', pull.issue.id())
                         pull.pulled = True
                         updated_pulls.append(pull)
+                if pull.issue.id() in request.get('unpull', []):
+                    if pull.pulled:
+                        results['updated'].append(pull_key.id())
+                        logging.info('unpulling %r', pull.issue.id())
+                        pull.pulled = False
+                        updated_pulls.append(pull)
+                    else:
+                        results['skipped'].append(pull_key.id())
                 if pull.issue.id() in request.get('read', []):
                     if pull.read:
                         results['skipped'].append(pull_key.id())
                     else:
                         results['updated'].append(pull_key.id())
+                        logging.info('Reading %r', pull.issue.id())
                         pull.pulled = True
                         pull.read = True
                         updated_pulls.append(pull)
                 if pull.issue.id() in request.get('unread', []):
                     if pull.read:
                         results['updated'].append(pull_key.id())
+                        logging.info('Unreading %r', pull.issue.id())
                         pull.read = False
                         updated_pulls.append(pull)
                     else:
