@@ -1,10 +1,9 @@
 'api calls for issue resources'
-from functools import partial
 import json
 import logging
-import os
 
 from google.appengine.api import search
+from google.appengine.datastore.datastore_query import Cursor
 from google.appengine.ext import ndb
 
 # pylint: disable=F0401
@@ -12,9 +11,9 @@ from pulldb.base import create_app, Route, OauthHandler
 from pulldb.models.base import model_to_dict
 from pulldb.models import comicvine
 from pulldb.models import issues
-from pulldb.models.issues import Issue
+from pulldb.models import pulls
 from pulldb.models import users
-from pulldb.models.volumes import Volume
+from pulldb.models import volumes
 
 # pylint: disable=W0232,E1101,R0903,C0103
 
@@ -59,6 +58,64 @@ class GetIssue(OauthHandler):
         self.response.write(json.dumps({
             'status': 200,
             'results': results
+        }))
+
+class ListIssues(OauthHandler):
+    order_keys = {
+        ('pubdate', 'asc'): issues.Issue.pubdate,
+        ('pubdate', 'desc'): -issues.Issue.pubdate,
+    }
+
+    @ndb.tasklet
+    def issue_context(self, issue):
+        volume_dict = {}
+        pull_dict = {}
+        if self.request.get('context'):
+            pull_key = ndb.Key('Pull', issue.key.id(), parent=self.user_key)
+            pull, volume = yield (
+                pull_key.get_async(),
+                issue.volume.get_async()
+            )
+            pull_dict = model_to_dict(pull)
+            volume_dict = model_to_dict(volume)
+        raise ndb.Return({
+            'pull': pull_dict,
+            'volume': volume_dict,
+            'issue': model_to_dict(issue),
+        })
+
+    @ndb.tasklet
+    def fetch_page(self, query):
+        limit = self.request.get('limit', 10)
+        cursor = Cursor(urlsafe=self.request.get('position'))
+        issue_matches, next_cursor, more = yield query.fetch_page_async(
+            limit, start_cursor=cursor)
+        context_futures = [self.issue_context(issue) for issue in issue_matches]
+        results = yield context_futures
+        raise ndb.Return(
+            results,
+            next_cursor,
+            more,
+        )
+
+    def get(self):
+        self.user_key = users.user_key(self.user)
+        sort = (self.request.get('sort_key'), self.request.get('sort_order'))
+        query = issues.Issue.query().order(
+            self.order_keys.get(sort, issues.Issue.pubdate)
+        )
+        count_future = query.count_async()
+        results, next_cursor, more = self.fetch_page(query).get_result()
+        if next_cursor:
+            position = next_cursor.urlsafe()
+        else:
+            position = ''
+        self.response.write(json.dumps({
+            'status': 200,
+            'message': '%d issues found' % count_future.get_result(),
+            'more_results': more,
+            'next_page': position,
+            'results': list(results),
         }))
 
 class RefreshIssue(OauthHandler):
@@ -134,7 +191,8 @@ class SearchIssues(OauthHandler):
 app = create_app([
     Route('/api/issues/<identifier>/reindex', Reindex),
     Route('/api/issues/get/<identifier>', GetIssue),
-    Route('/api/issues/refresh/<issue>', RefreshIssue),
     Route('/api/issues/index/<doc_id>/drop', DropIndex),
+    Route('/api/issues/list', ListIssues),
+    Route('/api/issues/refresh/<issue>', RefreshIssue),
     Route('/api/issues/search', SearchIssues),
 ])
