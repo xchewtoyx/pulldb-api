@@ -189,7 +189,12 @@ class SearchComicvine(OauthHandler):
                      results_count)
         results_page = results[offset:page_end]
         for result in results_page:
-            volume_id = volumes.volume_key(result)
+            try:
+                volume_id = volumes.volume_key(result)
+            except TypeError as error:
+                logging.warn(
+                    'Unable to lookup volume key for result %r (%r)',
+                    result, error)
 
         self.response.write(json.dumps({
             'status': 200,
