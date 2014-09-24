@@ -53,7 +53,7 @@ class GetIssue(OauthHandler):
         })
 
     def get(self, identifier):
-        query = Issue.query(Issue.identifier == int(identifier))
+        query = issues.Issue.query(issues.Issue.identifier == int(identifier))
         results = query.map(self.issue_context)
         self.response.write(json.dumps({
             'status': 200,
@@ -130,7 +130,7 @@ class RefreshIssue(OauthHandler):
 
     def get(self, issue):
         self.cv = comicvine.load()
-        query = Issue.query(Issue.identifier == int(issue))
+        query = issues.Issue.query(issues.Issue.identifier == int(issue))
         updated_issues = query.map(self.refresh_issue)
         if updated_issues:
             status = {

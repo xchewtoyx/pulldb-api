@@ -207,6 +207,34 @@ class NewIssues(OauthHandler):
         }
         self.response.write(json.dumps(result))
 
+
+class PullStats(OauthHandler):
+    def get(self):
+        user_key = users.user_key(self.user)
+        total_count = pulls.Pull.query(
+            ancestor=user_key).count_async()
+        new_count = pulls.Pull.query(
+            pulls.Pull.pulled == False,
+            ancestor=user_key).count_async()
+        unread_count = pulls.Pull.query(
+            pulls.Pull.pulled == True,
+            pulls.Pull.read == False,
+            ancestor=user_key).count_async()
+        read_count = pulls.Pull.query(
+            pulls.Pull.read == True,
+            ancestor=user_key).count_async()
+        result = {
+            'status': 200,
+            'counts': {
+                'new': new_count.get_result(),
+                'unread': unread_count.get_result(),
+                'read': read_count.get_result(),
+                'total': total_count.get_result(),
+            },
+        }
+        self.response.write(json.dumps(result))
+
+
 class RefreshPull(OauthHandler):
     @ndb.tasklet
     def refresh_pull(self, pull):
@@ -226,10 +254,11 @@ class RefreshPull(OauthHandler):
             pulls.Pull.identifier == int(identifier)
         )
         result = query.map(self.refresh_pull)
-        self.response.write({
+        response = {
             'status': 200,
             'message': 'pull refreshed',
-        })
+        }
+        self.response.write(json.dumps(response))
 
 class RemovePulls(OauthHandler):
     @ndb.toplevel
@@ -383,5 +412,6 @@ app = create_app([
     Route('/api/pulls/list/new', NewIssues),
     Route('/api/pulls/list/unread', UnreadIssues),
     Route('/api/pulls/remove', RemovePulls),
+    Route('/api/pulls/stats', PullStats),
     Route('/api/pulls/update', UpdatePulls),
 ])
