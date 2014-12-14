@@ -118,7 +118,8 @@ class GetPull(OauthHandler):
     def get(self, identifier):
         self.user_key = users.user_key(self.user)
         query = pulls.Pull.query(
-            pulls.Pull.identifier == int(identifier)
+            pulls.Pull.identifier == int(identifier),
+            ancestor=self.user_key,
         )
         context_callback = partial(
             pull_context, context=self.request.get('context'))
@@ -251,7 +252,8 @@ class RefreshPull(OauthHandler):
     def get(self, identifier):
         self.user_key = users.user_key(self.user)
         query = pulls.Pull.query(
-            pulls.Pull.identifier == int(identifier)
+            pulls.Pull.identifier == int(identifier),
+            ancestor=user_key
         )
         result = query.map(self.refresh_pull)
         response = {
