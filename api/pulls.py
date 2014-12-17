@@ -192,7 +192,7 @@ class NewIssues(OauthHandler):
         query = pulls.Pull.query(
             pulls.Pull.pulled == False,
             ancestor=user_key
-        ).order(pulls.Pull.pubdate)
+        ).order(-pulls.Pull.pubdate)
         count_future = query.count_async()
         new_pulls, next_cursor, more = self.fetch_page(query).get_result()
         if next_cursor:
