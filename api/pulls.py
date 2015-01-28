@@ -189,10 +189,14 @@ class NewIssues(OauthHandler):
 
     def get(self):
         user_key = users.user_key(self.user)
+        if self.request.get('reverse'):
+            sortkey = -pulls.Pull.pubdate
+        else:
+            sortkey = pulls.Pull.pubdate
         query = pulls.Pull.query(
             pulls.Pull.pulled == False,
             ancestor=user_key
-        ).order(-pulls.Pull.pubdate)
+        ).order(sortkey)
         count_future = query.count_async()
         new_pulls, next_cursor, more = self.fetch_page(query).get_result()
         if next_cursor:
