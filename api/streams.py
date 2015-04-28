@@ -113,7 +113,12 @@ class RefreshStream(OauthHandler):
             identifier, user_key=user_key, create=False)
         stream = stream.get()
         if stream:
-            query = pull.Pulls.query(pulls.Pull.stream == stream_key)
+            query = pull.Pulls.query(
+                pulls.Pull.ignored == False,
+                pulls.Pull.pulled == True,
+                pulls.Pull.read == False,
+                pulls.Pull.stream == stream_key,
+            )
             pulls = query.fetch(keys_only=True)
             stream.length = len(pulls)
             stream.put()

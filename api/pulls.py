@@ -153,9 +153,44 @@ class ListPulls(OauthHandler):
             more,
         )
 
-    def get(self):
-        user_key = users.user_key(self.user)
-        query = pulls.Pull.query(ancestor=user_key)
+    def query(self, pull_type):
+        sortkey = pulls.Pull.pubdate
+        if self.request.get('weighted'):
+            sortkey = pulls.Pull.weight
+        if self.request.get('reverse'):
+            sortkey = -sortkey
+        query_method = getattr(self, 'query_' + pull_type)
+        return query_method().order(sortkey)
+
+    def query_all(self):
+        return pulls.Pull.query(
+            ancestor=self.user_key
+        )
+
+    def query_ignored(self):
+        return pulls.Pull.query(
+            pulls.Pull.ignored == True,
+            ancestor=self.user_key
+        )
+
+    def query_new(self):
+        return pulls.Pull.query(
+            pulls.Pull.pulled == False,
+            pulls.Pull.ignored == False,
+            ancestor=self.user_key
+        )
+
+    def query_unread(self):
+        return pulls.Pull.query(
+            pulls.Pull.pulled == True,
+            pulls.Pull.ignored == False,
+            pulls.Pull.read == False,
+            ancestor=self.user_key
+        )
+
+    def get(self, pull_type=None):
+        self.user_key = users.user_key(self.user)
+        query = self.query(pull_type)
         count_future = query.count_async()
         results, next_cursor, more = self.fetch_page(query).get_result()
         if next_cursor:
@@ -169,48 +204,6 @@ class ListPulls(OauthHandler):
             'next_page': position,
             'results': list(results),
         }))
-
-class NewIssues(OauthHandler):
-    @ndb.tasklet
-    def fetch_page(self, query):
-        limit = self.request.get('limit', 100)
-        cursor = Cursor(urlsafe=self.request.get('position'))
-        pulls, next_cursor, more = yield query.fetch_page_async(
-            limit, start_cursor=cursor)
-        context_callback = partial(
-            pull_context, context=self.request.get('context'))
-        context_futures = map(context_callback, pulls)
-        results = yield context_futures
-        raise ndb.Return(
-            results,
-            next_cursor,
-            more,
-        )
-
-    def get(self):
-        user_key = users.user_key(self.user)
-        if self.request.get('reverse'):
-            sortkey = -pulls.Pull.pubdate
-        else:
-            sortkey = pulls.Pull.pubdate
-        query = pulls.Pull.query(
-            pulls.Pull.pulled == False,
-            ancestor=user_key
-        ).order(sortkey)
-        count_future = query.count_async()
-        new_pulls, next_cursor, more = self.fetch_page(query).get_result()
-        if next_cursor:
-            position = next_cursor.urlsafe()
-        else:
-            position = ''
-        result = {
-            'status': 200,
-            'message': 'Found %d results' % count_future.get_result(),
-            'position': position,
-            'more': more,
-            'results': new_pulls,
-        }
-        self.response.write(json.dumps(result))
 
 
 class PullStats(OauthHandler):
@@ -244,24 +237,41 @@ class RefreshPull(OauthHandler):
     @ndb.tasklet
     def refresh_pull(self, pull):
         if pull.issue and not pull.volume:
+            logging.info('Adding missing volume attribute to pull %r',
+                         pull.key)
             pull.volume = volumes.volume_key(pull.subscription.id())
-            if pull.volume:
-                logging.info('Adding missing volume attribute to pull %r',
-                             pull.key)
-                yield pull.put_async()
-                raise ndb.Return({
-                    'pull': model_to_dict(pull)
-                })
+            pull_changed = True
+        if pull.ignored and pull.pulled:
+            pull.pulled = False
+            pull_changed = True
+        if pull_changed:
+            yield pull.put_async()
+            raise ndb.Return({
+                'pull': model_to_dict(pull)
+            })
 
-    def get(self, identifier):
-        self.user_key = users.user_key(self.user)
+    def single(self, identifier):
         query = pulls.Pull.query(
             pulls.Pull.identifier == int(identifier),
             ancestor=user_key
         )
+
+    def shard(self, identifier):
+        query = pulls.Pull.query(
+            pulls.Pull.shard == int(identifier),
+            ancestor=user_key
+        )
+
+    def get(self, identifier, pull_type=None):
+        self.user_key = users.user_key(self.user)
+        if pull_type == shard:
+            query = self.query_shard(identifier)
+        else:
+            query = self.query_single(identifier)
         result = query.map(self.refresh_pull)
         response = {
             'status': 200,
+            'count': len(result),
             'message': 'pull refreshed',
         }
         self.response.write(json.dumps(response))
@@ -291,49 +301,6 @@ class RemovePulls(OauthHandler):
             'results': results
         }
         self.response.write(json.dumps(response))
-
-class UnreadIssues(OauthHandler):
-    @ndb.tasklet
-    def fetch_page(self, query):
-        limit = self.request.get('limit', 100)
-        cursor = Cursor(urlsafe=self.request.get('position'))
-        pulls, next_cursor, more = yield query.fetch_page_async(
-            limit, start_cursor=cursor)
-        context_callback = partial(
-            pull_context, context=self.request.get('context'))
-        context_futures = map(context_callback, pulls)
-        results = yield context_futures
-        raise ndb.Return(
-            results,
-            next_cursor,
-            more,
-        )
-
-    def get(self):
-        if self.request.get('weighted'):
-            sortkey = pulls.Pull.weight
-        else:
-            sortkey = pulls.Pull.pubdate
-        user_key = users.user_key(self.user)
-        query = pulls.Pull.query(
-            pulls.Pull.pulled == True,
-            pulls.Pull.read == False,
-            ancestor=user_key
-        ).order(sortkey)
-        count_future = query.count_async()
-        unread_pulls, next_cursor, more = self.fetch_page(query).get_result()
-        if next_cursor:
-            position = next_cursor.urlsafe()
-        else:
-            position = ''
-        result = {
-            'status': 200,
-            'message': 'Found %d unread pulls' % count_future.get_result(),
-            'more': more,
-            'position': position,
-            'results': unread_pulls,
-        }
-        self.response.write(json.dumps(result))
 
 class UpdatePulls(OauthHandler):
     def post(self):
@@ -413,10 +380,8 @@ app = create_app([
     Route('/api/pulls/add', AddPulls),
     Route('/api/pulls/fetch', FetchPulls),
     Route('/api/pulls/<identifier>/get', GetPull),
-    Route('/api/pulls/<identifier>/refresh', RefreshPull),
-    Route('/api/pulls/list/all', ListPulls),
-    Route('/api/pulls/list/new', NewIssues),
-    Route('/api/pulls/list/unread', UnreadIssues),
+    Route('/api/pulls/<identifier>/refresh<shard:(shard)?>', RefreshPull),
+    Route('/api/pulls/list/<pull_type:(all|new|unread|ignored)>', ListPulls),
     Route('/api/pulls/remove', RemovePulls),
     Route('/api/pulls/stats', PullStats),
     Route('/api/pulls/update', UpdatePulls),

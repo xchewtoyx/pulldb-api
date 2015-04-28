@@ -157,6 +157,7 @@ class Reindex(OauthHandler):
         self.response.write(json.dumps(response))
 
 class SearchComicvine(OauthHandler):
+    #TODO(rgh): paged results are broken.  Need to fix.
     def get(self):
         cv = comicvine.load()
         query = self.request.get('q')
