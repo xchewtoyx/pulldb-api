@@ -211,19 +211,25 @@ class PullStats(OauthHandler):
         user_key = users.user_key(self.user)
         total_count = pulls.Pull.query(
             ancestor=user_key).count_async()
+        ignored_count = pulls.Pull.query(
+            pulls.Pull.ignored == True,
+            ancestor=user_key).count_async()
         new_count = pulls.Pull.query(
             pulls.Pull.pulled == False,
+            pulls.Pull.ignored == False,
             ancestor=user_key).count_async()
         unread_count = pulls.Pull.query(
             pulls.Pull.pulled == True,
             pulls.Pull.read == False,
             ancestor=user_key).count_async()
         read_count = pulls.Pull.query(
+            pulls.Pull.pulled == True,
             pulls.Pull.read == True,
             ancestor=user_key).count_async()
         result = {
             'status': 200,
             'counts': {
+                'ignored': ignored_count.get_result(),
                 'new': new_count.get_result(),
                 'unread': unread_count.get_result(),
                 'read': read_count.get_result(),
