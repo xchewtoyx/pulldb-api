@@ -134,6 +134,52 @@ class RefreshStream(OauthHandler):
             'results': results,
         })
 
+
+class StreamStats(OauthHandler):
+    @ndb.tasklet
+    def stats_context(self, stream):
+        query_active = pulls.Pull.query(
+            pulls.Pull.stream == stream.key,
+            pulls.Pull.read == False,
+            pulls.Pull.pulled == True,
+            pulls.Pull.ignored == False,
+        )
+        query_pulls = pulls.Pull.query(
+            pulls.Pull.stream == stream.key,
+        )
+        query_first = query_active.order(pulls.Pull.pubdate)
+        query_last = query_active.order(-pulls.Pull.pubdate)
+        first_pull, last_pull, active, total = yield (
+            query_first.fetch_async(limit=1),
+            query_last.fetch_async(limit=1),
+            query_active.count_async(),
+            query_pulls.count_async()
+        )
+        if first_pull and last_pull:
+            backlog = (last_pull[0].pubdate - first_pull[0].pubdate).days
+        else:
+            backlog = 0
+        raise ndb.Return({
+            'stream': {
+                'name': stream.name,
+                'active': active,
+                'total': total,
+                'backlog': backlog,
+            }
+        })
+
+    def get(self):
+        user_key = users.user_key(self.user)
+        query = streams.Stream.query(ancestor=user_key)
+        context_callback = partial(
+            stream_context, context=self.request.get('context'))
+        results = query.map(self.stats_context)
+        self.response.write(json.dumps({
+            'status': 200,
+            'results': results,
+        }))
+
+
 class UpdateStreams(OauthHandler):
     def update_publishers(self, stream, updates):
         for publisher_id in updates.get('add', []):
@@ -245,5 +291,6 @@ app = create_app([
     Route('/api/streams/<identifier>/get', GetStream),
     Route('/api/streams/<identifier>/refresh', RefreshStream),
     Route('/api/streams/list', ListStreams),
+    Route('/api/streams/stats', StreamStats),
     Route('/api/streams/update', UpdateStreams),
 ])
