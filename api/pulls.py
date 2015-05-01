@@ -174,11 +174,18 @@ class ListPulls(OauthHandler):
         )
 
     def query_new(self):
-        return pulls.Pull.query(
-            pulls.Pull.pulled == False,
-            pulls.Pull.ignored == False,
-            ancestor=self.user_key
-        )
+        if self.request.get('all'):
+            query = pulls.Pull.query(
+                pulls.Pull.pulled == False,
+                ancestor=self.user_key
+            )
+        else:
+            query = pulls.Pull.query(
+                pulls.Pull.pulled == False,
+                pulls.Pull.ignored == False,
+                ancestor=self.user_key
+            )
+        return query
 
     def query_unread(self):
         return pulls.Pull.query(
