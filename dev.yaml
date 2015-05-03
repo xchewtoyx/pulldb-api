@@ -20,6 +20,8 @@ libraries:
   version: latest
 
 handlers:
+- url: /api/arcs/.*
+  script: api.arcs.app
 - url: /api/issues/.*
   script: api.issues.app
 - url: /api/pulls/.*
