@@ -32,3 +32,5 @@ handlers:
   script: api.subscriptions.app
 - url: /api/volumes/.*
   script: api.volumes.app
+- url: /api/watches/.*
+  script: api.watches.app
