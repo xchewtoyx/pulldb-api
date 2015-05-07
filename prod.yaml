@@ -20,6 +20,8 @@ libraries:
   version: latest
 
 handlers:
+- url: /api/arcs/.*
+  script: api.arcs.app
 - url: /api/issues/.*
   script: api.issues.app
 - url: /api/pulls/.*
@@ -30,3 +32,5 @@ handlers:
   script: api.subscriptions.app
 - url: /api/volumes/.*
   script: api.volumes.app
+- url: /api/watches/.*
+  script: api.watches.app
