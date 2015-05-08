@@ -115,7 +115,7 @@ class Issues(OauthHandler):
         volume = volumes.volume_key(identifier, create=False).get()
         if volume:
             query = issues.Issue.query(
-                ancestor=volume.key
+                issues.Issue.volume == volume.key
             ).order(issues.Issue.pubdate)
             logging.debug('Looking for issues: %r', query)
             results = query.fetch()

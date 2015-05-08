@@ -60,6 +60,29 @@ class GetIssue(OauthHandler):
             'results': results
         }))
 
+
+class IssueStats(OauthHandler):
+    def get(self):
+        include_total = False
+        if self.request.get('all'):
+            include_total = True
+            total_count = issues.Issue.query().count_async()
+        queued_count = issues.Issue.query(
+            issues.Issue.complete == False).count_async()
+        toindex_count = issues.Issue.query(
+            issues.Issue.indexed == False).count_async()
+        result = {
+            'status': 200,
+            'counts': {
+                'queued': queued_count.get_result(),
+                'toindex': toindex_count.get_result(),
+            },
+        }
+        if include_total:
+            result['counts']['total'] = total_count.get_result()
+        self.response.write(json.dumps(result))
+
+
 class ListIssues(OauthHandler):
     order_keys = {
         ('pubdate', 'asc'): issues.Issue.pubdate,
@@ -195,4 +218,5 @@ app = create_app([
     Route('/api/issues/list', ListIssues),
     Route('/api/issues/refresh/<issue>', RefreshIssue),
     Route('/api/issues/search', SearchIssues),
+    Route('/api/issues/stats', IssueStats),
 ])
