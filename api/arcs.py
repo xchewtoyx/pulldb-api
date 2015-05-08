@@ -49,6 +49,29 @@ class AddArcs(OauthHandler):
         }
         self.response.write(json.dumps(response))
 
+
+class ArcStats(OauthHandler):
+    def get(self):
+        include_total = False
+        if self.request.get('all'):
+            include_total = True
+            total_count = arcs.StoryArc.query().count_async()
+        queued_count = arcs.StoryArc.query(
+            arcs.StoryArc.complete == False).count_async()
+        toindex_count = arcs.StoryArc.query(
+            arcs.StoryArc.indexed == False).count_async()
+        result = {
+            'status': 200,
+            'counts': {
+                'queued': queued_count.get_result(),
+                'toindex': toindex_count.get_result(),
+            },
+        }
+        if include_total:
+            result['counts']['total'] = total_count.get_result()
+        self.response.write(json.dumps(result))
+
+
 class DropIndex(OauthHandler):
     def get(self, doc_id):
         user = users.user_key(app_user=self.user).get()
@@ -230,4 +253,5 @@ app = create_app([ # pylint: disable=invalid-name
     Route('/api/arcs/index/<doc_id>/drop', DropIndex),
     Route('/api/arcs/search/comicvine', SearchComicvine),
     Route('/api/arcs/search/local', SearchArcs),
+    Route('/api/arcs/stats', ArcStats),
 ])

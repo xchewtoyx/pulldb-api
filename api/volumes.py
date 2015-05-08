@@ -226,6 +226,29 @@ class SearchVolumes(OauthHandler):
             'results': results,
         }))
 
+
+class VolumeStats(OauthHandler):
+    def get(self):
+        include_total = False
+        if self.request.get('all'):
+            include_total = True
+            total_count = volumes.Volume.query().count_async()
+        queued_count = volumes.Volume.query(
+            volumes.Volume.complete == False).count_async()
+        toindex_count = volumes.Volume.query(
+            volumes.Volume.indexed == False).count_async()
+        result = {
+            'status': 200,
+            'counts': {
+                'queued': queued_count.get_result(),
+                'toindex': toindex_count.get_result(),
+            },
+        }
+        if include_total:
+            result['counts']['total'] = total_count.get_result()
+        self.response.write(json.dumps(result))
+
+
 app = create_app([
     Route('/api/volumes/add', AddVolumes),
     Route('/api/volumes/<identifier>/get', GetVolume),
@@ -234,4 +257,5 @@ app = create_app([
     Route('/api/volumes/index/<doc_id>/drop', DropIndex),
     Route('/api/volumes/search/comicvine', SearchComicvine),
     Route('/api/volumes/search', SearchVolumes),
+    Route('/api/volumes/stats', VolumeStats),
 ])
