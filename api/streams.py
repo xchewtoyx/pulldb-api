@@ -93,6 +93,65 @@ class GetStream(OauthHandler):
             'results': results,
         }))
 
+
+class ListStreamPulls(OauthHandler):
+    @ndb.tasklet
+    def pull_context(self, pull):
+        if self.request.get('context'):
+            issue = yield pull.issue.get_async()
+            issue_dict = model_to_dict(issue)
+        else:
+            issue_dict = {}
+        raise ndb.Return({
+            'pull': model_to_dict(pull),
+            'issue': issue_dict,
+        })
+
+    def fetch_stream(self, stream_id):
+        query = streams.Stream.query(
+            streams.Stream.name == stream_id,
+            ancestor=self.user_key,
+        )
+        stream = query.get()
+        return stream
+
+    def pull_filter(self, query, pull_type):
+        if pull_type == 'all':
+            return query
+        if pull_type == 'unread':
+            return query.filter(pulls.Pull.read == False)
+        logging.error('Unrecognised filter type %r', pull_type)
+        raise ValueError('Unrecognised filter type %r' % pull_type)
+
+    def get(self, identifier, pull_type):
+        self.user_key = users.user_key(self.user)
+        stream = self.fetch_stream(identifier)
+        stream_pulls = pulls.Pull.query(
+            pulls.Pull.stream == stream.key,
+            ancestor=self.user_key
+        )
+        total_pulls = stream_pulls.count_async()
+        pull_query = self.pull_filter(stream_pulls, pull_type)
+        pull_count = pull_query.count_async()
+        results = pull_query.order(pulls.Pull.pubdate).map(self.pull_context)
+        if stream:
+            status = 200
+            message = 'Stream %s found' % identifier,
+            stream = model_to_dict(stream)
+        else:
+            status = 404
+            message = 'Stream %s not found' % identifier
+            stream = {}
+        self.response.write(json.dumps({
+            'status': status,
+            'message': message,
+            'stream': stream,
+            'results': results,
+            'total': total_pulls.get_result(),
+            'count': pull_count.get_result(),
+        }))
+
+
 class ListStreams(OauthHandler):
     def get(self):
         user_key = users.user_key(self.user)
@@ -261,7 +320,7 @@ class UpdateStreams(OauthHandler):
         for stream_updates in request:
             stream = streams.stream_key(
                 stream_updates['name'],
-                user_key = user_key,
+                user_key=user_key,
                 create=False,
             ).get()
             if not stream:
@@ -289,6 +348,7 @@ class UpdateStreams(OauthHandler):
 app = create_app([
     Route('/api/streams/add', AddStreams),
     Route('/api/streams/<identifier>/get', GetStream),
+    Route('/api/streams/<identifier>/list/<pull_type>', ListStreamPulls),
     Route('/api/streams/<identifier>/refresh', RefreshStream),
     Route('/api/streams/list', ListStreams),
     Route('/api/streams/stats', StreamStats),
