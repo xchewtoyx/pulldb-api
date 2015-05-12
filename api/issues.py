@@ -123,8 +123,11 @@ class ListIssues(OauthHandler):
 
     def get(self):
         self.user_key = users.user_key(self.user)
+        query = issues.Issue.query()
+        if self.request.get('queued'):
+            query = query.filter(issues.Issue.complete == False)
         sort = (self.request.get('sort_key'), self.request.get('sort_order'))
-        query = issues.Issue.query().order(
+        query = query.order(
             self.order_keys.get(sort, issues.Issue.pubdate)
         )
         count_future = query.count_async()
