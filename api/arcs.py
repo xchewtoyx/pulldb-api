@@ -98,13 +98,18 @@ class DropIndex(OauthHandler):
 class GetArc(OauthHandler):
     @ndb.tasklet
     def arc_context(self, arc):
-        publisher = publishers.Publisher()
+        publisher = None
         if self.request.get('context'):
             publisher = yield arc.publisher.get_async()
 
+        if publisher:
+            publisher = model_to_dict(publisher)
+        else:
+            publisher = {}
+
         raise ndb.Return({
             'arc': model_to_dict(arc),
-            'publisher': model_to_dict(publisher),
+            'publisher': publisher,
         })
 
     def get(self, identifier):
