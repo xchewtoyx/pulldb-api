@@ -126,11 +126,14 @@ class ListIssues(OauthHandler):
         query = issues.Issue.query()
         if self.request.get('queued'):
             query = query.filter(issues.Issue.complete == False)
-        sort = (self.request.get('sort_key'), self.request.get('sort_order'))
-        query = query.order(
-            self.order_keys.get(sort, issues.Issue.pubdate)
-        )
         count_future = query.count_async()
+        sort_key = (
+            self.request.get('sort_key'),
+            self.request.get('sort_order')
+        )
+        sort = self.order_keys.get(sort_key)
+        if sort:
+            query = query.order(sort)
         results, next_cursor, more = self.fetch_page(query).get_result()
         if next_cursor:
             position = next_cursor.urlsafe()
