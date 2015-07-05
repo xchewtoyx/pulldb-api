@@ -1,4 +1,5 @@
 'Api endpoints for working with volumes'
+# pylint: disable=missing-docstring
 from collections import defaultdict
 import json
 import logging
@@ -6,21 +7,18 @@ import re
 
 from google.appengine.api import search
 from google.appengine.ext import ndb
+from google.appengine.ext.ndb.query import Cursor
 
-# pylint: disable=F0401
 from pulldb.base import create_app, Route, OauthHandler
 from pulldb.models.base import model_to_dict
 from pulldb.models import comicvine
 from pulldb.models import issues
-from pulldb.models import subscriptions
 from pulldb.models import users
 from pulldb.models import volumes
 
-# pylint: disable=W0232,E1101,R0903,C0103
-
 class AddVolumes(OauthHandler):
     def post(self):
-        cv = comicvine.load()
+        cv_api = comicvine.load()
         request = json.loads(self.request.body)
         volume_ids = request['volumes']
         results = defaultdict(list)
@@ -37,7 +35,7 @@ class AddVolumes(OauthHandler):
                 results['existing'].append(key.id())
             else:
                 candidates.append(int(key.id()))
-        cv_volumes = cv.fetch_volume_batch(candidates)
+        cv_volumes = cv_api.fetch_volume_batch(candidates)
         for cv_volume in cv_volumes:
             key = volumes.volume_key(cv_volume)
             if key.get():
@@ -77,20 +75,13 @@ class GetVolume(OauthHandler):
     @ndb.tasklet
     def volume_context(self, volume):
         publisher_dict = {}
-        subscription_dict = {}
         if self.request.get('context'):
-            user_key = users.user_key(app_user=self.user)
-            publisher, subscription = yield (
-                volume.publisher.get_async(),
-                subscriptions.subscription_key(
-                    volume.key, user=user_key, create=False).get_async())
+            publisher = yield volume.publisher.get_async()
             publisher_dict = model_to_dict(publisher)
-            subscription_dict = model_to_dict(subscription)
 
         raise ndb.Return({
             'volume': model_to_dict(volume),
             'publisher': publisher_dict,
-            'subscription': subscription_dict,
         })
 
     def get(self, identifier):
@@ -127,13 +118,57 @@ class Issues(OauthHandler):
                 'results': [model_to_dict(issue) for issue in results],
             }
         else:
-            logging.info('Volume %s not foune', identifier)
+            logging.info('Volume %s not found', identifier)
             response = {
                 'status': 404,
                 'message': 'Volume %s not found' % identifier,
                 'results': [],
             }
         self.response.write(json.dumps(response))
+
+
+class ListVolumes(OauthHandler):
+    @ndb.tasklet
+    def volume_context(self, volume):
+        publisher_dict = {}
+        if self.request.get('context'):
+            publisher = yield volume.publisher.get_async()
+            publisher_dict = model_to_dict(publisher)
+        raise ndb.Return({
+            'volume': model_to_dict(volume),
+            'publisher': publisher_dict,
+        })
+
+    @ndb.tasklet
+    def fetch_page(self, query):
+        limit = self.request.get('limit', 10)
+        cursor = Cursor(urlsafe=self.request.get('position'))
+        volume_matches, next_cursor, more = yield query.fetch_page_async(
+            limit, start_cursor=cursor)
+        context_futures = [
+            self.volume_context(volume) for volume in volume_matches]
+        results = yield context_futures
+        raise ndb.Return(
+            results,
+            next_cursor,
+            more,
+        )
+
+    def get(self, volume_type='all'):
+        query = volumes.Volume.query()
+        if volume_type == 'queued':
+            query = query.filter(volumes.Volume.complete == False)
+        page_future = self.fetch_page(query)
+        results, next_cursor, more = page_future.get_result()
+        response = {
+            'status': 200,
+            'count': len(results),
+            'next': next_cursor.urlsafe,
+            'more': more,
+            'results': results,
+        }
+        self.response.write(json.dumps(response))
+
 
 class Reindex(OauthHandler):
     def get(self, identifier):
@@ -144,7 +179,7 @@ class Reindex(OauthHandler):
         volume_key = volumes.volume_key(identifier, create=False)
         volume = volume_key.get()
         if volume:
-            volumes.index_volume(volume_key, volume)
+            volume.index_document()
             response = {
                 'status': 200,
                 'message': 'Volume %s reindexed' % identifier,
@@ -157,9 +192,13 @@ class Reindex(OauthHandler):
         self.response.write(json.dumps(response))
 
 class SearchComicvine(OauthHandler):
+    def __init__(self, *args, **kwargs):
+        super(SearchComicvine, self).__init__(*args, **kwargs)
+        self.cv_api = comicvine.load()
+
     #TODO(rgh): paged results are broken.  Need to fix.
     def get(self):
-        cv = comicvine.load()
+        # pylint: disable=too-many-locals
         query = self.request.get('q')
         volume_ids = self.request.get('volume_ids')
         page = int(self.request.get('page', 0))
@@ -175,11 +214,11 @@ class SearchComicvine(OauthHandler):
             for index in range(0, len(volume_ids), 100):
                 volume_page = volume_ids[
                     index:min([index+100, len(volume_ids)])]
-                results.extend(cv.fetch_volume_batch(volume_page))
+                results.extend(self.cv_api.fetch_volume_batch(volume_page))
             results_count = len(results)
             logging.debug('Found volumes: %r', results)
         elif query:
-            results_count, results = cv.search_volume(
+            results_count, results = self.cv_api.search_volume(
                 query, page=page, limit=limit)
             logging.debug('Found volumes: %r', results)
         if offset + limit > results_count:
@@ -189,13 +228,6 @@ class SearchComicvine(OauthHandler):
         logging.info('Retrieving results %d-%d / %d', offset, page_end,
                      results_count)
         results_page = results[offset:page_end]
-        for result in results_page:
-            try:
-                volume_id = volumes.volume_key(result)
-            except TypeError as error:
-                logging.warn(
-                    'Unable to lookup volume key for result %r (%r)',
-                    result, error)
 
         self.response.write(json.dumps({
             'status': 200,
@@ -218,8 +250,8 @@ class SearchVolumes(OauthHandler):
                 for field in volume.fields:
                     result[field.name] = unicode(field.value)
                 results.append(result)
-        except search.Error as e:
-            logging.exception(e)
+        except search.Error as err:
+            logging.exception(err)
         self.response.write(json.dumps({
             'status': 200,
             'count': matches.number_found,
@@ -249,12 +281,14 @@ class VolumeStats(OauthHandler):
         self.response.write(json.dumps(result))
 
 
+#pylint: disable=invalid-name
 app = create_app([
     Route('/api/volumes/add', AddVolumes),
     Route('/api/volumes/<identifier>/get', GetVolume),
     Route('/api/volumes/<identifier>/list', Issues),
     Route('/api/volumes/<identifier>/reindex', Reindex),
     Route('/api/volumes/index/<doc_id>/drop', DropIndex),
+    Route('/api/volumes/list/<type>', ListVolumes),
     Route('/api/volumes/search/comicvine', SearchComicvine),
     Route('/api/volumes/search', SearchVolumes),
     Route('/api/volumes/stats', VolumeStats),
