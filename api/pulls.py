@@ -101,8 +101,8 @@ class FetchPulls(OauthHandler):
         for pull_id in request.get('ids', []):
             pull_keys.append(
                 pulls.pull_key(pull_id, user=user_key, create=False))
-        pulls = ndb.get_multi(pull_keys)
-        if pulls:
+        pull_list = ndb.get_multi(pull_keys)
+        if pull_list:
             status = 200
             message = 'Found %d pulls' % identifier
         else:
@@ -111,7 +111,7 @@ class FetchPulls(OauthHandler):
         self.response.write(json.dumps({
             'status': status,
             'message': message,
-            'results': pulls,
+            'results': pull_list,
         }))
 
 class GetPull(OauthHandler):
@@ -316,76 +316,143 @@ class RemovePulls(OauthHandler):
         self.response.write(json.dumps(response))
 
 class UpdatePulls(OauthHandler):
+    operations = ['pull', 'unpull', 'read', 'unread', 'ignore', 'unignore']
+
+    def __init__(self, *args, **kwargs):
+        self.user_key = None
+        self.results = defaultdict(list)
+        super(UpdatePulls, self).__init__(*args, **kwargs)
+
+    @ndb.tasklet
+    def check_pulls(self, pull_ids):
+        pull_keys = [
+            pulls.pull_key(pull_id, user=self.user_key) for pull_id in pull_ids]
+        pull_list = yield ndb.get_multi_async(pull_keys)
+        raise ndb.Return(pull_list)
+
+    @ndb.tasklet
+    def pull(self, pull_ids):
+        pull_list = yield self.check_pulls(pull_ids)
+        updated_pulls = []
+        for pull in pull_list:
+            if pull:
+                if pull.pulled:
+                    self.results['skipped'].append(pull.key.id())
+                else:
+                    self.results['updated'].append(pull.key.id())
+                    logging.info('pulling %r', pull.issue.id())
+                    pull.pulled = True
+                    updated_pulls.append(pull)
+            else:
+                self.results['failed'].append(pull.key.id())
+        updated_keys = yield ndb.put_multi_async(updated_pulls)
+        raise ndb.Return(updated_keys)
+
+    @ndb.tasklet
+    def unpull(self, pull_ids):
+        pull_list = yield self.check_pulls(pull_ids)
+        updated_pulls = []
+        for pull in pull_list:
+            if pull:
+                if pull.pulled:
+                    self.results['updated'].append(pull.key.id())
+                    logging.info('unpulling %r', pull.issue.id())
+                    pull.pulled = False
+                    updated_pulls.append(pull)
+                else:
+                    self.results['skipped'].append(pull.key.id())
+            else:
+                self.results['failed'].append(pull.key.id())
+        updated_keys = yield ndb.put_multi_async(updated_pulls)
+        raise ndb.Return(updated_keys)
+
+    @ndb.tasklet
+    def read(self, pull_ids):
+        pull_list = yield self.check_pulls(pull_ids)
+        updated_pulls = []
+        for pull in pull_list:
+            if pull:
+                if pull.read:
+                    self.results['skipped'].append(pull.key.id())
+                else:
+                    self.results['updated'].append(pull.key.id())
+                    logging.info('marking %r read', pull.key.id())
+                    pull.pulled = True
+                    pull.read = True
+                    updated_pulls.append(pull)
+            else:
+                self.results['failed'].append(pull.key.id())
+        updated_keys = yield ndb.put_multi_async(updated_pulls)
+        raise ndb.Return(updated_keys)
+
+    @ndb.tasklet
+    def unread(self, pull_ids):
+        pull_list = yield self.check_pulls(pull_ids)
+        updated_pulls = []
+        for pull in pull_list:
+            if pull:
+                if pull.read:
+                    self.results['updated'].append(pull.key.id())
+                    logging.info('marking %r unread', pull.issue.id())
+                    pull.read = False
+                    updated_pulls.append(pull)
+                else:
+                    self.results['skipped'].append(pull.key.id())
+            else:
+                self.results['failed'].append(pull.key.id())
+        updated_keys = yield ndb.put_multi_async(updated_pulls)
+        raise ndb.Return(updated_keys)
+
+    @ndb.tasklet
+    def ignore(self, pull_ids):
+        pull_list = yield self.check_pulls(pull_ids)
+        updated_pulls = []
+        for pull in pull_list:
+            if pull:
+                if pull.ignored:
+                    self.results['skipped'].append(pull.key.id())
+                else:
+                    self.results['updated'].append(pull.key.id())
+                    logging.info('ignoring %r', pull.issue.id())
+                    pull.ignored = True
+                    pull.pulled = False
+                    updated_pulls.append(pull)
+            else:
+                self.results['failed'].append(pull.key.id())
+        updated_keys = yield ndb.put_multi_async(updated_pulls)
+        raise ndb.Return(updated_keys)
+
+    @ndb.tasklet
+    def unignore(self, pull_ids):
+        pull_list = yield self.check_pulls(pull_ids)
+        updated_pulls = []
+        for pull in pull_list:
+            if pull:
+                if pull.ignored:
+                    self.results['updated'].append(pull.key.id())
+                    logging.info('unignoring %r', pull.issue.id())
+                    pull.ignored = False
+                    updated_pulls.append(pull)
+                else:
+                    self.results['skipped'].append(pull.key.id())
+            else:
+                self.results['failed'].append(pull.key.id())
+        updated_keys = yield ndb.put_multi_async(updated_pulls)
+        raise ndb.Return(updated_keys)
+
     def post(self):
-        user_key = users.user_key(self.user)
+        self.user_key = users.user_key(self.user)
         request = json.loads(self.request.body)
         logging.debug('Decoded post data: %r' % request)
-        issue_ids = (
-            request.get('pull', []) +
-            request.get('unpull', []) +
-            request.get('read', []) +
-            request.get('unread', [])
-        )
-        results = defaultdict(list)
-        query = issues.Issue.query(issues.Issue.identifier.IN(
-            [int(identifier) for identifier in issue_ids]))
-        records = query.fetch()
-        issue_dict = {record.key.id(): record for record in records}
-        candidates = []
-        for issue_id in issue_ids:
-            issue = issue_dict.get(issue_id)
-            if issue:
-                pull_key = pulls.pull_key(issue_id, user=user_key)
-                candidates.append(pull_key)
-            else:
-                # no such issue
-                results['failed'].append(issue_id)
-        # prefetch for efficiency
-        ndb.get_multi(candidates)
         updated_pulls = []
-        for pull_key in candidates:
-            pull = pull_key.get()
-            if pull:
-                if pull.issue.id() in request.get('pull', []):
-                    if pull.pulled:
-                        results['skipped'].append(pull_key.id())
-                    else:
-                        results['updated'].append(pull_key.id())
-                        logging.info('pulling %r', pull.issue.id())
-                        pull.pulled = True
-                        updated_pulls.append(pull)
-                if pull.issue.id() in request.get('unpull', []):
-                    if pull.pulled:
-                        results['updated'].append(pull_key.id())
-                        logging.info('unpulling %r', pull.issue.id())
-                        pull.pulled = False
-                        updated_pulls.append(pull)
-                    else:
-                        results['skipped'].append(pull_key.id())
-                if pull.issue.id() in request.get('read', []):
-                    if pull.read:
-                        results['skipped'].append(pull_key.id())
-                    else:
-                        results['updated'].append(pull_key.id())
-                        logging.info('Reading %r', pull.issue.id())
-                        pull.pulled = True
-                        pull.read = True
-                        updated_pulls.append(pull)
-                if pull.issue.id() in request.get('unread', []):
-                    if pull.read:
-                        results['updated'].append(pull_key.id())
-                        logging.info('Unreading %r', pull.issue.id())
-                        pull.read = False
-                        updated_pulls.append(pull)
-                    else:
-                        results['skipped'].append(pull_key.id())
-            else:
-                # No such pull
-                results['failed'].append(pull_key.id())
-        ndb.put_multi(updated_pulls)
+        for operation in self.operations:
+            method = getattr(self, operation)
+            if method and request.get(operation):
+                updated_pulls.append(method(request[operation]))
+        ndb.Future.wait_all(updated_pulls)
         response = {
             'status': 200,
-            'results': results
+            'results': self.results
         }
         self.response.write(json.dumps(response))
 
