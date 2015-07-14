@@ -38,7 +38,7 @@ class AddArcs(OauthHandler):
                 candidates.append(arc_id)
         cv_arcs = api.fetch_story_arc_batch(candidates)
         for cv_arc in cv_arcs:
-            key = arcs.arc_key(cv_arc, create=True, batch=True)
+            key = arcs.arc_key(cv_arc, create=True)
             if key.get():
                 results['added'].append(cv_arc['id'])
             else:
