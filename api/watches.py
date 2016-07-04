@@ -5,11 +5,13 @@ import logging
 
 from dateutil.parser import parse as parse_date
 
+from google.appengine.datastore.datastore_query import Cursor
 from google.appengine.ext import ndb
 
 from pulldb.base import create_app, Route, OauthHandler
 from pulldb.models.base import model_to_dict
 from pulldb.models import arcs
+from pulldb.models import pulls
 from pulldb.models import subscriptions
 from pulldb.models import users
 from pulldb.models import volumes
@@ -61,6 +63,83 @@ class AddWatches(OauthHandler):
             'results': self.results,
         }
         self.response.write(json.dumps(response))
+
+
+class ListPulls(OauthHandler):
+    @ndb.tasklet
+    def fetch_page(self, query):
+        limit = self.request.get('limit', 100)
+        cursor = Cursor(urlsafe=self.request.get('position'))
+        pulls, next_cursor, more = yield query.fetch_page_async(
+            limit, start_cursor=cursor)
+        context_callback = partial(
+            pull_context, context=self.request.get('context'))
+        context_futures = map(context_callback, pulls)
+        results = yield context_futures
+        raise ndb.Return(
+            results,
+            next_cursor,
+            more,
+        )
+
+    def query(self, watch, pull_type):
+        sortkey = pulls.Pull.pubdate
+        if self.request.get('weighted'):
+            sortkey = pulls.Pull.weight
+        if self.request.get('reverse'):
+            sortkey = -sortkey
+        base_query = pulls.Pull.query(
+            pulls.Pull.collection == watch.collection,
+            ancestor=self.user_key,
+        )
+        query_method = getattr(self, 'query_' + pull_type)
+        return query_method(base_query).order(sortkey)
+
+    def query_all(self, base_query):
+        return base_query
+
+    def query_ignored(self, base_query):
+        return base_query.filter(
+            pulls.Pull.ignored == True,
+        )
+
+    def query_new(self, base_query):
+        if not self.request.get('all'):
+            base_query = base_query.filter(
+                pulls.Pull.ignored == False,
+            )
+        base_query = base_query.filter(
+            pulls.Pull.pulled == False,
+        )
+        return base_query
+
+    def query_unread(self, base_query):
+        return pulls.Pull.query(
+            pulls.Pull.pulled == True,
+            pulls.Pull.ignored == False,
+            pulls.Pull.read == False,
+            ancestor=self.user_key
+        )
+
+    def get(self, identifier, pull_type=None):
+        self.user_key = users.user_key(self.user)
+        watch_key = ndb.Key(urlsafe=identifier)
+        watch = watch_key.get()
+        query = self.query(watch, pull_type)
+        count_future = query.count_async()
+        results, next_cursor, more = self.fetch_page(query).get_result()
+        if next_cursor:
+            position = next_cursor.urlsafe()
+        else:
+            position = ''
+        self.response.write(json.dumps({
+            'status': 200,
+            'message': '%d pulls found' % count_future.get_result(),
+            'more_results': more,
+            'next_page': position,
+            'results': list(results),
+        }))
+
 
 class ListWatches(OauthHandler):
     @ndb.tasklet
@@ -209,6 +288,8 @@ def volume_keys(volume_ids):
 app = create_app([ # pylint: disable=invalid-name
     Route('/api/watches/add', AddWatches),
     Route('/api/watches/list', ListWatches),
+    Route('/api/watches/<identifier>/pulls/'
+          '<pull_type:(all|new|unread|ignored)>', ListPulls),
     Route('/api/watches/remove', RemoveWatches),
     Route('/api/watches/update', UpdateWatches),
 ])
