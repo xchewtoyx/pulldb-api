@@ -1,5 +1,5 @@
 'Api endpoints for working with volumes'
-# pylint: disable=missing-docstring
+# pylint: disable=missing-docstring, no-member
 from collections import defaultdict
 import json
 import logging
@@ -170,6 +170,30 @@ class ListVolumes(OauthHandler):
         self.response.write(json.dumps(response))
 
 
+class QueueVolume(OauthHandler):
+    'Manually queue a volume for updates.'
+    def get(self, identifier):
+        user = users.user_key(app_user=self.user).get()
+        if not user.trusted:
+            logging.warn('Untrusted access attempt: %r', self.user)
+            self.abort(401)
+        volume_key = volumes.volume_key(identifier, create=False)
+        volume = volume_key.get()
+        if volume:
+            volume.complete = False
+            volume.put()
+            response = {
+                'status': 200,
+                'message': 'Volume %s queued' % identifier,
+            }
+        else:
+            response = {
+                'status': 404,
+                'message': 'Volume %s not found' % identifier,
+            }
+        self.response.write(json.dumps(response))
+
+
 class Reindex(OauthHandler):
     def get(self, identifier):
         user = users.user_key(app_user=self.user).get()
@@ -286,6 +310,7 @@ app = create_app([
     Route('/api/volumes/add', AddVolumes),
     Route('/api/volumes/<identifier>/get', GetVolume),
     Route('/api/volumes/<identifier>/list', Issues),
+    Route('/api/volumes/<identifier>/queue', QueueVolume),
     Route('/api/volumes/<identifier>/reindex', Reindex),
     Route('/api/volumes/index/<doc_id>/drop', DropIndex),
     Route('/api/volumes/list/<type>', ListVolumes),
